@@ -10,6 +10,7 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -197,5 +198,180 @@ func TestPostgresNullVectorRoundTrip(t *testing.T) {
 	}
 	if ids, _ := st.MissingVectorIDs(ctx); len(ids) != 0 {
 		t.Fatalf("still listed as missing: %v", ids)
+	}
+}
+
+// TestPostgresVectorConsistencyAcrossReads is a regression test for a real,
+// silent bug from this project's history: Get and List once selected a
+// column list that omitted "embedding" entirely. Nothing errored — pgx
+// happily scanned the columns that WERE selected — so every note came back
+// with an empty Vector from those two paths, even though Upsert had stored
+// one. That silently defeated Write's "reuse the vector when the body is
+// byte-identical" optimization (Get always reported no vector, so Write
+// always re-embedded) for an unknown amount of time before anyone noticed.
+//
+// A column-COUNT mismatch (the noteColumns drift this session also hit, in
+// KeywordSearch) is loud — pgx errors immediately with a clear "number of
+// field descriptions must equal number of destinations" message, and any
+// integration test exercising that path catches it. A column-CONTENT gap
+// like the original Vector bug is the dangerous one: no error, just quietly
+// wrong data. This test targets that silent case directly by asserting Get,
+// List, and KeywordSearch all agree on the vector for the same note.
+func TestPostgresVectorConsistencyAcrossReads(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	want := []float32{0.11, 0.22, 0.33, 0.44}
+	n := core.Note{
+		ID:          "vector-consistency",
+		Title:       "Vector Consistency",
+		Body:        "distinctive-keyword-for-search needle-search-term",
+		ContentHash: "h-vector-consistency",
+		Vector:      want,
+	}
+	if err := st.Upsert(ctx, n); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	assertVector := func(label string, got []float32, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s: vector length = %d, want %d (got %v)", label, len(got), len(want), got)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("%s: vector[%d] = %v, want %v", label, i, got[i], want[i])
+			}
+		}
+	}
+
+	// Get
+	got, err := st.Get(ctx, n.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	assertVector("Get", got.Vector, nil)
+
+	// List
+	list, err := st.List(ctx, 100, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var found bool
+	for _, ln := range list {
+		if ln.ID == n.ID {
+			found = true
+			assertVector("List", ln.Vector, nil)
+		}
+	}
+	if !found {
+		t.Fatalf("List did not return the note %q", n.ID)
+	}
+
+	// KeywordSearch
+	hits, err := st.KeywordSearch(ctx, "needle-search-term", 10)
+	if err != nil {
+		t.Fatalf("keyword search: %v", err)
+	}
+	found = false
+	for _, h := range hits {
+		if h.ID == n.ID {
+			found = true
+			assertVector("KeywordSearch", h.Vector, nil)
+		}
+	}
+	if !found {
+		t.Fatalf("KeywordSearch did not return the note %q", n.ID)
+	}
+}
+
+// --- degraded-mode engine flow against a REAL Postgres -----------------
+
+// fail4Embedder always errors — simulates the embedder being unreachable
+// (e.g. LM Studio down), which this session hit repeatedly on both the
+// compose and kube deployment paths.
+type fail4Embedder struct{}
+
+func (fail4Embedder) Model() string { return "down" }
+func (fail4Embedder) Embed(context.Context, string) ([]float32, error) {
+	return nil, fmt.Errorf("connection refused")
+}
+
+// fixed4Embedder returns a real, fixed-length vector matching startPG's
+// 4-dim store, simulating the embedder being back up.
+type fixed4Embedder struct{ calls int }
+
+func (e *fixed4Embedder) Model() string { return "fixed" }
+func (e *fixed4Embedder) Embed(context.Context, string) ([]float32, error) {
+	e.calls++
+	return []float32{0.1, 0.2, 0.3, 0.4}, nil
+}
+
+// TestEngineDegradedModeAgainstRealPostgres exercises the full degraded ->
+// backfill flow (Write with no embedder -> keyword-only search -> reembed
+// once the embedder is back -> semantic search) against a real database,
+// not the in-memory fake. internal/core/engine_test.go covers this logic
+// with memStore; this is the same behavior verified through the real SQL,
+// since that's the layer that actually broke this session (NULL scanning,
+// column drift) — logic-only coverage wouldn't have caught either bug.
+func TestEngineDegradedModeAgainstRealPostgres(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	down := core.NewEngine(st, fail4Embedder{})
+	if _, err := down.Write(ctx, core.WriteInput{
+		Title: "Offline Note",
+		Body:  "written while the embedder was unreachable",
+	}); err != nil {
+		t.Fatalf("degraded write should succeed: %v", err)
+	}
+
+	missing, err := down.MissingVectors(ctx)
+	if err != nil {
+		t.Fatalf("missing vectors: %v", err)
+	}
+	if missing != 1 {
+		t.Fatalf("missing vectors = %d, want 1", missing)
+	}
+
+	// Search still works via keyword fallback with no embedder.
+	hits, err := down.Search(ctx, "unreachable", 5, "")
+	if err != nil {
+		t.Fatalf("search while degraded: %v", err)
+	}
+	if len(hits) != 1 || hits[0].Kind != "keyword" {
+		t.Fatalf("expected one keyword hit while degraded, got %+v", hits)
+	}
+
+	// Embedder comes back: a NEW Engine sharing the same store (mirrors a
+	// process restart with the embedder now reachable), backfill missing.
+	fx := &fixed4Embedder{}
+	up := core.NewEngine(st, fx)
+	n, err := up.Reembed(ctx, true)
+	if err != nil {
+		t.Fatalf("reembed: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("reembedded = %d, want 1", n)
+	}
+	if fx.calls != 1 {
+		t.Fatalf("embedder calls during backfill = %d, want 1", fx.calls)
+	}
+	if missing, _ := up.MissingVectors(ctx); missing != 0 {
+		t.Fatalf("still missing %d vectors after backfill", missing)
+	}
+
+	// Semantic search now finds it via the real vector.
+	hits, err = up.Search(ctx, "offline note", 5, "semantic")
+	if err != nil {
+		t.Fatalf("semantic search after backfill: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatalf("expected a semantic hit after backfill, got none")
 	}
 }

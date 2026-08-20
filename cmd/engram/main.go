@@ -1,5 +1,5 @@
 // Command engram runs the memory service: one process serving MCP, a REST API,
-// and a web UI over a single SQLite-backed store, with embeddings from an
+// and a web UI over a Postgres/pgvector-backed store, with embeddings from an
 // OpenAI-compatible endpoint (LM Studio by default).
 package main
 
@@ -47,14 +47,7 @@ func main() {
 	// ENGRAM_DSN wins when set; otherwise assemble it from discrete pieces so
 	// the password can arrive via a real secret (kube secretKeyRef, podman
 	// secret) instead of living inside a connection string in a manifest.
-	if *dsn == "" {
-		*dsn = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
-			url.QueryEscape(env("ENGRAM_DB_USER", "engram")),
-			url.QueryEscape(env("ENGRAM_DB_PASSWORD", "engram")),
-			env("ENGRAM_DB_HOST", "localhost"),
-			env("ENGRAM_DB_PORT", "5432"),
-			env("ENGRAM_DB_NAME", "engram"))
-	}
+	*dsn = resolveDSN(*dsn)
 
 	if *healthck {
 		os.Exit(runHealthcheck(*addr))
@@ -161,6 +154,29 @@ func env(k, def string) string {
 	return def
 }
 
+// resolveDSN returns explicit if non-empty (the ENGRAM_DSN flag/env case);
+// otherwise it assembles a DSN from the discrete ENGRAM_DB_* pieces. This is
+// what lets a kube Secret hold only the password (via secretKeyRef) while
+// the rest of the connection info stays in a plain ConfigMap — no full
+// connection string, password included, needs to live in a manifest.
+// Pulled into its own function (rather than left inline in main) so it has
+// direct test coverage: this exact assembly was the point of failure in a
+// real incident (an older binary silently ignored ENGRAM_DB_* and fell back
+// to its own hardcoded default DSN instead of erroring, which produced a
+// confusing "password authentication failed" against the wrong port for a
+// long time before the mismatch was traced to a stale image).
+func resolveDSN(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		url.QueryEscape(env("ENGRAM_DB_USER", "engram")),
+		url.QueryEscape(env("ENGRAM_DB_PASSWORD", "engram")),
+		env("ENGRAM_DB_HOST", "localhost"),
+		env("ENGRAM_DB_PORT", "5432"),
+		env("ENGRAM_DB_NAME", "engram"))
+}
+
 func envInt(k string, def int) int {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -208,14 +224,18 @@ engram needs a pgvector-enabled Postgres. This image does not bundle one.
   Docs: https://github.com/davasorus/engram
 `
 
-// redactDSN hides the password in a postgres URL for logging.
+// redactDSN hides the password in a postgres URL for logging. Uses the
+// word REDACTED rather than a symbol like "****" — url.UserPassword followed
+// by .String() percent-encodes reserved userinfo characters (including '*'),
+// so a symbol placeholder came out as "%2A%2A%2A%2A" in the log instead of
+// "****". A plain word has no characters requiring escaping.
 func redactDSN(dsn string) string {
 	u, err := url.Parse(dsn)
 	if err != nil || u.User == nil {
 		return dsn
 	}
 	if _, has := u.User.Password(); has {
-		u.User = url.UserPassword(u.User.Username(), "****")
+		u.User = url.UserPassword(u.User.Username(), "REDACTED")
 	}
 	return u.String()
 }
