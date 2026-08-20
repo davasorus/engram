@@ -18,7 +18,7 @@ cp compose/.env.example compose/.env
 # Set the embed URL to the Windows-host gateway + portproxy port:
 sed -i '/^ENGRAM_EMBED_URL=/d' compose/.env
 echo "ENGRAM_EMBED_URL=http://$(ip route show default | awk '{print $3}'):1235" >> compose/.env
-podman-compose -f compose/compose.yml up -d --build
+podman-compose -f compose/compose.yml up -d   # pulls ghcr.io/davasorus/engram:${ENGRAM_VERSION}
 ```
 
 The default `.env.example` sets `ENGRAM_MCP_TOOLS=mem_search,mem_read,mem_write`

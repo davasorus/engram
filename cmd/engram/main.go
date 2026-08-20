@@ -6,8 +6,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -31,7 +33,7 @@ var (
 
 func main() {
 	var (
-		dsn        = flag.String("dsn", env("ENGRAM_DSN", "postgres://engram:engram@localhost:5432/engram?sslmode=disable"), "Postgres connection string")
+		dsn        = flag.String("dsn", env("ENGRAM_DSN", ""), "Postgres connection string (overrides the ENGRAM_DB_* pieces)")
 		dims       = flag.Int("dims", envInt("ENGRAM_DIMS", 768), "embedding vector dimensionality (must match the embed model)")
 		addr       = flag.String("addr", env("ENGRAM_ADDR", ":8088"), "HTTP listen address")
 		embedURL   = flag.String("embed-url", env("ENGRAM_EMBED_URL", "http://127.0.0.1:1234"), "OpenAI-compatible embeddings base URL")
@@ -41,6 +43,18 @@ func main() {
 		healthck   = flag.Bool("healthcheck", false, "probe the local /api/health endpoint and exit 0/1 (for container HEALTHCHECK)")
 	)
 	flag.Parse()
+
+	// ENGRAM_DSN wins when set; otherwise assemble it from discrete pieces so
+	// the password can arrive via a real secret (kube secretKeyRef, podman
+	// secret) instead of living inside a connection string in a manifest.
+	if *dsn == "" {
+		*dsn = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+			url.QueryEscape(env("ENGRAM_DB_USER", "engram")),
+			url.QueryEscape(env("ENGRAM_DB_PASSWORD", "engram")),
+			env("ENGRAM_DB_HOST", "localhost"),
+			env("ENGRAM_DB_PORT", "5432"),
+			env("ENGRAM_DB_NAME", "engram"))
+	}
 
 	if *healthck {
 		os.Exit(runHealthcheck(*addr))
@@ -52,16 +66,24 @@ func main() {
 	// so retry the initial connection briefly rather than crashing.
 	var st *store.Postgres
 	var err error
+	// Log the effective config up front (no secrets) so a misconfigured
+	// container explains itself instead of just dialing the wrong address.
+	log.Printf("engram starting: db=%s embed=%s model=%s dims=%d addr=%s",
+		redactDSN(*dsn), *embedURL, *embedModel, *dims, *addr)
+
 	for attempt := 1; attempt <= 30; attempt++ {
 		st, err = store.Open(ctx, *dsn, *dims)
 		if err == nil {
 			break
 		}
+		if attempt == 1 {
+			log.Print(deployHint)
+		}
 		log.Printf("waiting for postgres (attempt %d/30): %v", attempt, err)
 		time.Sleep(2 * time.Second)
 	}
 	if err != nil {
-		log.Fatalf("open store: %v", err)
+		log.Fatalf("open store: %v\n%s", err, deployHint)
 	}
 	defer func() { _ = st.Close() }()
 
@@ -154,4 +176,46 @@ func logRequests(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 		log.Printf("%s %s (%s)", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
 	})
+}
+
+// deployHint is printed when the database is unreachable — the most common
+// state for someone who ran the bare image with no configuration. It has to
+// carry them to a working deployment on its own, because a `podman run` user
+// has no compose file, no .env, and no repo checked out.
+const deployHint = `
+engram needs a pgvector-enabled Postgres. This image does not bundle one.
+
+  Required env (one of):
+    ENGRAM_DSN           full postgres:// connection string, or
+    ENGRAM_DB_HOST/PORT/USER/PASSWORD/NAME   discrete pieces (password can
+                         then come from a real secret, not a string in git)
+  Plus:
+    ENGRAM_EMBED_URL     OpenAI-compatible embeddings endpoint (e.g. LM Studio)
+
+  Kube deploy, no clone (secret is generated locally, never committed;
+  all tunables live in the ConfigMap at the top of the manifest):
+    curl -LO https://github.com/davasorus/engram/releases/latest/download/engram-kube.yaml
+    curl -LO https://github.com/davasorus/engram/releases/latest/download/secret.example.yaml
+    sed "s/REPLACE_ME/$(openssl rand -hex 20)/" secret.example.yaml | podman kube play -
+    $EDITOR engram-kube.yaml    # ConfigMap: embed URL/port, dims, db names
+    podman kube play engram-kube.yaml
+
+  Or compose (fetch the two files, edit .env, up):
+    curl -LO  https://github.com/davasorus/engram/releases/latest/download/compose.yml
+    curl -Lo .env https://github.com/davasorus/engram/releases/latest/download/env.example
+    podman-compose up -d
+
+  Docs: https://github.com/davasorus/engram
+`
+
+// redactDSN hides the password in a postgres URL for logging.
+func redactDSN(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil || u.User == nil {
+		return dsn
+	}
+	if _, has := u.User.Password(); has {
+		u.User = url.UserPassword(u.User.Username(), "****")
+	}
+	return u.String()
 }

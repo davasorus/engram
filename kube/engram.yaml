@@ -1,22 +1,55 @@
 # engram — Kubernetes-shaped manifests (engram + pgvector).
 #
-#   Podman:      podman play kube kube/engram.yaml
-#   Kubernetes:  kubectl apply -f kube/engram.yaml
+# ── Deploy (podman) ─────────────────────────────────────────────────────────
+#   1. Create the DB password secret ONCE, locally — it never touches git:
+#        curl -LO https://github.com/davasorus/engram/releases/latest/download/secret.example.yaml
+#        sed "s/REPLACE_ME/$(openssl rand -hex 20)/" secret.example.yaml | podman kube play -
+#      (kubectl: kubectl create secret generic engram-db \
+#                  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 20)")
+#   2. Edit the ConfigMap below — it is the ONLY block with tunables.
+#   3. podman kube play engram.yaml     (kubectl apply -f engram.yaml)
+#      UI/REST/MCP land on http://localhost:8088 — both pods use
+#      hostNetwork: true, so containerPort 8088 binds the host directly.
 #
-# Two workloads: a pgvector Postgres with a persistent volume, and the engram
-# service. engram waits for Postgres via its own connect-retry loop, so start
-# order is not critical.
+# engram waits for Postgres via its own connect-retry loop, so start order
+# is not critical.
 ---
+# ═══ EDIT ME: every tunable lives here ══════════════════════════════════════
 apiVersion: v1
-kind: Secret
+kind: ConfigMap
 metadata:
-  name: engram-db
+  name: engram-config
   labels: { app: engram }
-type: Opaque
-stringData:
-  POSTGRES_USER: engram
-  POSTGRES_PASSWORD: change-me
-  POSTGRES_DB: engram
+data:
+  # Embeddings endpoint (OpenAI-compatible, e.g. LM Studio). Both pods run
+  # with hostNetwork: true (see below), so this pod shares the real host's
+  # network namespace — plain localhost works the same way it does for
+  # compose/compose.yml's network_mode: host, including WSL2's built-in
+  # localhost->Windows forwarding if the embed server runs on Windows next
+  # to a WSL2 host.
+  ENGRAM_EMBED_URL: "http://localhost:1234"
+  ENGRAM_EMBED_MODEL: "text-embedding-nomic-embed-text-v1.5"
+  # Must match the embed model's output width (nomic-embed-text-v1.5 = 768).
+  ENGRAM_DIMS: "768"
+  ENGRAM_ADDR: ":8088"
+  # MCP tool allowlist for agents (empty = all seven tools).
+  ENGRAM_MCP_TOOLS: "mem_search,mem_read,mem_write"
+  # Database identity. Password comes from the engram-db secret (step 1) —
+  # by design there is no password field in this file.
+  # Both pods run with hostNetwork: true (see below) — pods share the real
+  # host's network namespace, so "the db" is just localhost, not a Service
+  # DNS name. podman kube play does not implement cross-pod Service DNS the
+  # way real Kubernetes does, so a service-name host here would fail.
+  ENGRAM_DB_HOST: "localhost"
+  # If 5432 is already contended on this host (a lingering process, a
+  # different Postgres, etc.) — this is the ONLY place to change it. The
+  # db Deployment's PGPORT env and readinessProbe both read/must match
+  # this value too (readinessProbe's exec command can't read env, so keep
+  # its literal port argument in sync by hand if you change this).
+  ENGRAM_DB_PORT: "55432"
+  ENGRAM_DB_USER: "engram"
+  ENGRAM_DB_NAME: "engram"
+# ═════════════════════════════════════════════════════════════════════════════
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -42,11 +75,35 @@ spec:
     metadata:
       labels: { app: engram, component: db }
     spec:
+      # See ENGRAM_DB_HOST comment in the ConfigMap above.
+      hostNetwork: true
       containers:
         - name: postgres
           image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b # keep in sync with compose/compose.yml (dependabot updates that one)
-          envFrom:
-            - secretRef: { name: engram-db }
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                {
+                  configMapKeyRef: { name: engram-config, key: ENGRAM_DB_USER },
+                }
+            - name: POSTGRES_DB
+              valueFrom:
+                {
+                  configMapKeyRef: { name: engram-config, key: ENGRAM_DB_NAME },
+                }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                { secretKeyRef: { name: engram-db, key: POSTGRES_PASSWORD } }
+            # This is what actually controls the bind port — with
+            # hostNetwork: true there's no port-remapping layer, so PGPORT
+            # is the source of truth. containerPort below can't read the
+            # ConfigMap (k8s ports: don't support valueFrom), so it's
+            # informational only; PGPORT is what matters.
+            - name: PGPORT
+              valueFrom:
+                {
+                  configMapKeyRef: { name: engram-config, key: ENGRAM_DB_PORT },
+                }
           ports:
             - containerPort: 5432
           volumeMounts:
@@ -54,7 +111,10 @@ spec:
               mountPath: /var/lib/postgresql/data
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "engram", "-d", "engram"]
+              # Note: probe args don't expand env — keep this port in sync
+              # with ENGRAM_DB_PORT in the ConfigMap if you change it.
+              command:
+                ["pg_isready", "-U", "engram", "-d", "engram", "-p", "55432"]
             initialDelaySeconds: 5
             periodSeconds: 5
       volumes:
@@ -86,28 +146,29 @@ spec:
     metadata:
       labels: { app: engram, component: app }
     spec:
+      # hostNetwork: true puts this pod in the real host's network
+      # namespace, matching compose/compose.yml's network_mode: host —
+      # this is what lets ENGRAM_EMBED_URL's default (host.containers.internal
+      # or localhost, depending on setup) actually work, and is why the db
+      # is reached at ENGRAM_DB_HOST=localhost rather than a service name.
+      hostNetwork: true
       containers:
         - name: engram
-          image: engram:local   # build/push this image; or use your registry ref
+          image: ghcr.io/davasorus/engram:latest # ships as a release artifact; latest keeps it evergreen
+          envFrom:
+            - configMapRef: { name: engram-config }
           env:
-            - name: ENGRAM_ADDR
-              value: ":8088"
-            - name: ENGRAM_DIMS
-              value: "768"
-            - name: ENGRAM_EMBED_URL
-              value: "http://host.containers.internal:1234"
-            - name: ENGRAM_EMBED_MODEL
-              value: "text-embedding-nomic-embed-text-v1.5"
-            - name: DB_USER
-              valueFrom: { secretKeyRef: { name: engram-db, key: POSTGRES_USER } }
-            - name: DB_PASS
-              valueFrom: { secretKeyRef: { name: engram-db, key: POSTGRES_PASSWORD } }
-            - name: DB_NAME
-              valueFrom: { secretKeyRef: { name: engram-db, key: POSTGRES_DB } }
-            - name: ENGRAM_DSN
-              value: "postgres://$(DB_USER):$(DB_PASS)@engram-db:5432/$(DB_NAME)?sslmode=disable"
+            - name: ENGRAM_DB_PASSWORD
+              valueFrom:
+                { secretKeyRef: { name: engram-db, key: POSTGRES_PASSWORD } }
           ports:
             - containerPort: 8088
+              # With hostNetwork: true, this binds directly to the host's
+              # port 8088 — no separate hostPort mapping needed (in fact
+              # podman rejects one: "PortMappings can only be used with
+              # Bridge, slirp4netns, or pasta networking"). The NodePort
+              # Service below is inert under podman kube play regardless
+              # (podman ignores Service objects); it's there for real k8s.
           readinessProbe:
             httpGet: { path: /api/health, port: 8088 }
             initialDelaySeconds: 10

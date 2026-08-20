@@ -60,3 +60,15 @@ release:
   github:
     owner: davasorus
     name: engram
+  # Deploy artifacts for image-only consumers: someone who pulled from GHCR
+  # has no repo checkout, so the compose file, env template, and kube
+  # manifest ship on the release itself (see deployHint in cmd/engram).
+  extra_files:
+    - glob: compose/compose.yml
+      name_template: compose.yml
+    - glob: compose/.env.example
+      name_template: env.example
+    - glob: kube/engram.yaml
+      name_template: engram-kube.yaml
+    - glob: kube/secret.example.yaml
+      name_template: secret.example.yaml

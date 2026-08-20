@@ -51,7 +51,11 @@ HNSW cosine index; keyword search uses a GIN full-text index as a fallback.
 ```bash
 cp compose/.env.example compose/.env
 $EDITOR compose/.env          # set POSTGRES_PASSWORD, ENGRAM_DIMS, embed URL
-podman-compose -f compose/compose.yml up -d --build
+cd compose && cp .env.example .env   # set POSTGRES_PASSWORD + ENGRAM_EMBED_URL
+podman-compose -f compose.yml up -d  # pulls ghcr.io/davasorus/engram
+
+# Developing engram itself? Build from source with the overlay:
+#   podman-compose -f compose.yml -f compose.dev.yml up -d --build
 # UI:   http://localhost:8088/
 # MCP:  http://localhost:8088/mcp/
 # REST: http://localhost:8088/api/

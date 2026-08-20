@@ -1,53 +1,64 @@
 # engram — the agent's memory service + its Postgres/pgvector database.
 #
-# Two services, fully declared. Nothing is hand-installed; `up` brings the
-# whole stack online.
+#   Podman:  podman-compose -f compose/compose.yml up -d
+#   Docker:  docker compose  -f compose/compose.yml up -d
 #
-#   Podman:  podman-compose -f compose/compose.yml up -d --build
-#   Docker:  docker compose  -f compose/compose.yml up -d --build
+# Pulls the published image. To build from source: the dev overlay
+# podman-compose -f compose.yml -f compose.dev.yml up -d --build
 #
-# Persistence is the Postgres volume (pgdata). That volume is your backup unit.
-
+# Persistence is the Postgres volume (pgdata) — that's your backup unit.
+#
+# NETWORKING — both services use network_mode: host. Rootless containers
+# normally get their own isolated network namespace, which breaks WSL2's
+# built-in (always-on) localhost->Windows forwarding for anything inside a
+# container. network_mode: host puts these containers in the real WSL/Linux
+# network namespace instead, so plain "localhost" works for everything —
+# reaching Postgres, reaching an embedding server on Windows, and Windows
+# reaching engram's own port. This is the first-class, supported setup for
+# native podman/docker on Linux, including WSL2 running them directly.
+#
+# Podman machine / Docker Desktop on Windows/macOS are a DIFFERENT
+# situation (their own VM, not this host's namespace) — see
+# docs/NETWORKING.md for what to adjust if that's your setup instead.
 services:
   db:
     image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
     container_name: engram-db
+    network_mode: host
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-engram}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-engram}"
       POSTGRES_DB: "${POSTGRES_DB:-engram}"
+      PGPORT: "${ENGRAM_PG_PORT:-5432}"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-engram} -d ${POSTGRES_DB:-engram}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-engram} -d ${POSTGRES_DB:-engram} -p ${ENGRAM_PG_PORT:-5432}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
     restart: unless-stopped
 
   engram:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-    image: engram:local
+    image: ghcr.io/davasorus/engram:${ENGRAM_VERSION:-latest}
     container_name: engram
+    network_mode: host
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "${ENGRAM_PORT:-8088}:8088"
     environment:
-      ENGRAM_ADDR: ":8088"
-      ENGRAM_DSN: "postgres://${POSTGRES_USER:-engram}:${POSTGRES_PASSWORD:-engram}@db:5432/${POSTGRES_DB:-engram}?sslmode=disable"
+      ENGRAM_ADDR: ":${ENGRAM_PORT:-8088}"
+      ENGRAM_DSN: "postgres://${POSTGRES_USER:-engram}:${POSTGRES_PASSWORD:-engram}@localhost:${ENGRAM_PG_PORT:-5432}/${POSTGRES_DB:-engram}?sslmode=disable"
       ENGRAM_DIMS: "${ENGRAM_DIMS:-768}"
-      # Embeddings endpoint. From a container, use the host's reachable address.
-      # On Podman/WSL: host.containers.internal; on Docker Desktop: host.docker.internal.
-      ENGRAM_EMBED_URL: "${ENGRAM_EMBED_URL:-http://host.containers.internal:1234}"
+      ENGRAM_EMBED_URL: "${ENGRAM_EMBED_URL:-http://localhost:1234}"
       ENGRAM_EMBED_MODEL: "${ENGRAM_EMBED_MODEL:-text-embedding-nomic-embed-text-v1.5}"
-      # MCP tool allowlist (empty = all). See .env.example.
       ENGRAM_MCP_TOOLS: "${ENGRAM_MCP_TOOLS:-}"
     healthcheck:
-      test: ["CMD", "/engram", "-healthcheck", "-addr", ":8088"]
+      test: ["CMD", "/engram", "-healthcheck", "-addr", ":${ENGRAM_PORT:-8088}"]
       interval: 30s
       timeout: 5s
       retries: 3
