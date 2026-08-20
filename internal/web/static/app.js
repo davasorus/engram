@@ -5,17 +5,27 @@
 //      dropdown is the one bit HTMX alone doesn't do well)
 
 // --- rich rendering ---------------------------------------------------------
+var mermaidReady = false;
 function renderRich(root) {
   root = root || document;
   if (window.mermaid) {
     try {
-      mermaid.initialize({ startOnLoad: false, theme: "dark" });
-      root.querySelectorAll(".mermaid").forEach(function (el, i) {
-        if (el.dataset.done) return;
-        mermaid.render("mmd-" + Date.now() + "-" + i, el.textContent)
-          .then(function (out) { el.innerHTML = out.svg; el.dataset.done = "1"; })
-          .catch(function () {});
-      });
+      if (!mermaidReady) {
+        // securityLevel "strict" is mermaid's default, but pin it explicitly:
+        // note bodies are agent-written from outside content, so diagram
+        // source is only semi-trusted.
+        mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
+        mermaidReady = true;
+      }
+      // mermaid.run() renders AND inserts internally (with its sanitizer),
+      // instead of us piping textContent -> render -> innerHTML ourselves
+      // (CodeQL js/xss-through-dom). It also marks nodes data-processed,
+      // so re-runs after htmx swaps skip already-rendered diagrams.
+      var nodes = Array.prototype.filter.call(
+        root.querySelectorAll(".mermaid"),
+        function (el) { return !el.hasAttribute("data-processed"); }
+      );
+      if (nodes.length) mermaid.run({ nodes: nodes }).catch(function () {});
     } catch (e) {}
   }
   if (window.katex) {
@@ -52,7 +62,7 @@ function quicksearch() {
       var q = this.$refs.q.value.trim();
       if (!q) return;
       var kind = document.querySelector("[name=qs-kind]").value;
-      window.location.href = "/search?q=" + encodeURIComponent(q) + "&kind=" + kind;
+      window.location.href = "/search?" + new URLSearchParams({ q: q, kind: kind });
     },
   };
 }
@@ -79,7 +89,7 @@ function wikilinks() {
         body: JSON.stringify({ id: id, title: title, body: body, tags: tags })
       }).then(function (r) { return r.json(); }).then(function (n) {
         if (n.error) { self.status = "error: " + n.error; return; }
-        location.href = "/note/" + n.id;
+        location.href = "/note/" + encodeURIComponent(n.id);
       }).catch(function () { self.status = "save failed"; });
     },
     onKeyup(e) {
