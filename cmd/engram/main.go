@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -35,6 +36,7 @@ func main() {
 		addr       = flag.String("addr", env("ENGRAM_ADDR", ":8088"), "HTTP listen address")
 		embedURL   = flag.String("embed-url", env("ENGRAM_EMBED_URL", "http://127.0.0.1:1234"), "OpenAI-compatible embeddings base URL")
 		embedModel = flag.String("embed-model", env("ENGRAM_EMBED_MODEL", "text-embedding-nomic-embed-text-v1.5"), "embedding model id")
+		mcpTools   = flag.String("mcp-tools", env("ENGRAM_MCP_TOOLS", ""), "comma-separated MCP tool allowlist, e.g. mem_search,mem_read,mem_write (empty = all tools)")
 		stdio      = flag.Bool("stdio", false, "run the MCP server over stdio instead of HTTP")
 		healthck   = flag.Bool("healthcheck", false, "probe the local /api/health endpoint and exit 0/1 (for container HEALTHCHECK)")
 	)
@@ -65,7 +67,11 @@ func main() {
 
 	emb := embed.New(*embedURL, *embedModel)
 	eng := core.NewEngine(st, emb)
-	mcpAdapter := emcp.New(eng)
+	var allowedTools []string
+	if *mcpTools != "" {
+		allowedTools = strings.Split(*mcpTools, ",")
+	}
+	mcpAdapter := emcp.New(eng, allowedTools)
 
 	// Stdio mode: expose ONLY the MCP server over stdin/stdout (for clients
 	// that spawn the process as a subprocess).

@@ -3,6 +3,7 @@
 #   - GitHub Actions (workflow `uses:`)
 #   - Dockerfile base images (digest + tag updates — FROMs are digest-pinned)
 #   - compose/compose.yml service images (pgvector)
+#   - npm manifest for vendored web assets (htmx, alpine)
 #
 # NOT covered by dependabot (no ecosystem for raw k8s manifests):
 #   - kube/engram.yaml — its pgvector image must be kept in sync with
@@ -64,6 +65,28 @@ updates:
       prefix: "chore"
       include: "scope"
     labels: ["deps", "docker"]
+
+  # Vendored web assets (htmx, alpine) — package.json is the version
+  # manifest; internal/web/static holds the actual embedded files. After a
+  # bump PR: `npm ci && npm run assets`, commit the refreshed static files
+  # (CI's drift check enforces this).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Detroit
+    cooldown:
+      default-days: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels: ["deps", "web"]
 
   # Service images in the compose stack (pgvector/pgvector:pg16).
   - package-ecosystem: docker-compose

@@ -37,6 +37,16 @@ func (m *memStore) List(_ context.Context, limit, offset int) ([]core.Note, erro
 	return out, nil
 }
 func (m *memStore) Count(_ context.Context) (int, error) { return len(m.notes), nil }
+func (m *memStore) MissingVectorIDs(_ context.Context) ([]string, error) {
+	var out []string
+	for id, n := range m.notes {
+		if len(n.Vector) == 0 {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
 func (m *memStore) SearchSemantic(_ context.Context, _ []float32, limit int) ([]core.SearchHit, error) {
 	var out []core.SearchHit
 	for _, n := range m.notes {

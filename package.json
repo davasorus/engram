@@ -1,0 +1,12 @@
+{
+  "name": "engram-web-assets",
+  "private": true,
+  "description": "Version manifest for the vendored JS in internal/web/static. Not a build system: `npm run assets` copies dist files into static/, which are then embedded into the Go binary via go:embed. Dependabot tracks these deps; after merging a bump PR, run `npm ci && npm run assets` and commit the refreshed files.",
+  "dependencies": {
+    "alpinejs": "3.16.2",
+    "htmx.org": "2.0.10"
+  },
+  "scripts": {
+    "assets": "cp node_modules/htmx.org/dist/htmx.min.js internal/web/static/htmx.min.js && cp node_modules/alpinejs/dist/cdn.min.js internal/web/static/alpine.min.js"
+  }
+}

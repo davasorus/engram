@@ -140,7 +140,7 @@ ON CONFLICT (id) DO UPDATE SET
 }
 
 func (p *Postgres) Get(ctx context.Context, id string) (*core.Note, error) {
-	n, err := p.scanOne(ctx, `SELECT id,title,body,frontmatter,tags,content_hash,created,updated FROM notes WHERE id=$1`, id)
+	n, err := p.scanOne(ctx, `SELECT id,title,body,frontmatter,tags,content_hash,created,updated,embedding FROM notes WHERE id=$1`, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -156,12 +156,16 @@ func (p *Postgres) scanOne(ctx context.Context, q string, args ...any) (*core.No
 	var (
 		n        core.Note
 		fm, tags []byte
+		vec      *pgvector.Vector // nullable: degraded writes have no vector
 	)
-	if err := row.Scan(&n.ID, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated); err != nil {
+	if err := row.Scan(&n.ID, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated, &vec); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal(fm, &n.Frontmatter)
 	_ = json.Unmarshal(tags, &n.Tags)
+	if vec != nil {
+		n.Vector = vec.Slice()
+	}
 	return &n, nil
 }
 
@@ -191,7 +195,7 @@ func (p *Postgres) List(ctx context.Context, limit, offset int) ([]core.Note, er
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := p.pool.Query(ctx, `SELECT id,title,body,frontmatter,tags,content_hash,created,updated FROM notes ORDER BY updated DESC LIMIT $1 OFFSET $2`, limit, offset)
+	rows, err := p.pool.Query(ctx, `SELECT id,title,body,frontmatter,tags,content_hash,created,updated,embedding FROM notes ORDER BY updated DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -205,12 +209,16 @@ func (p *Postgres) scanMany(rows pgx.Rows) ([]core.Note, error) {
 		var (
 			n        core.Note
 			fm, tags []byte
+			vec      *pgvector.Vector
 		)
-		if err := rows.Scan(&n.ID, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated); err != nil {
+		if err := rows.Scan(&n.ID, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated, &vec); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(fm, &n.Frontmatter)
 		_ = json.Unmarshal(tags, &n.Tags)
+		if vec != nil {
+			n.Vector = vec.Slice()
+		}
 		out = append(out, n)
 	}
 	return out, rows.Err()
@@ -220,6 +228,23 @@ func (p *Postgres) Count(ctx context.Context) (int, error) {
 	var n int
 	err := p.pool.QueryRow(ctx, `SELECT COUNT(*) FROM notes`).Scan(&n)
 	return n, err
+}
+
+func (p *Postgres) MissingVectorIDs(ctx context.Context) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `SELECT id FROM notes WHERE embedding IS NULL ORDER BY updated ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // SearchSemantic runs pgvector KNN directly in SQL — the DB does the ranking,

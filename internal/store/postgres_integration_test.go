@@ -156,3 +156,46 @@ func TestPostgresCountAndList(t *testing.T) {
 		t.Fatalf("list: %v (%d)", err, len(list))
 	}
 }
+
+// TestPostgresNullVectorRoundTrip covers degraded writes: a note stored with
+// no vector must scan back cleanly (NULL embedding -> empty Vector), show up
+// in MissingVectorIDs, and disappear from it once a vector is upserted.
+func TestPostgresNullVectorRoundTrip(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	n := core.Note{ID: "degraded", Title: "Degraded", Body: "written while embedder was down", ContentHash: "h1"}
+	if err := st.Upsert(ctx, n); err != nil {
+		t.Fatalf("upsert without vector: %v", err)
+	}
+
+	got, err := st.Get(ctx, "degraded")
+	if err != nil {
+		t.Fatalf("get with NULL embedding: %v", err)
+	}
+	if got == nil || len(got.Vector) != 0 {
+		t.Fatalf("expected empty vector, got %+v", got)
+	}
+
+	ids, err := st.MissingVectorIDs(ctx)
+	if err != nil {
+		t.Fatalf("missing ids: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "degraded" {
+		t.Fatalf("missing ids: %v", ids)
+	}
+
+	// Backfill: same note with a vector; must scan back and leave the list.
+	n.Vector = []float32{0.1, 0.2, 0.3, 0.4}
+	if err := st.Upsert(ctx, n); err != nil {
+		t.Fatalf("backfill upsert: %v", err)
+	}
+	got, err = st.Get(ctx, "degraded")
+	if err != nil || len(got.Vector) != 4 {
+		t.Fatalf("vector after backfill: %+v err=%v", got, err)
+	}
+	if ids, _ := st.MissingVectorIDs(ctx); len(ids) != 0 {
+		t.Fatalf("still listed as missing: %v", ids)
+	}
+}

@@ -62,6 +62,10 @@ type Store interface {
 	// Count returns the total number of notes.
 	Count(ctx context.Context) (int, error)
 
+	// MissingVectorIDs returns IDs of notes with no stored embedding
+	// (created by degraded writes while the embedder was unreachable).
+	MissingVectorIDs(ctx context.Context) ([]string, error)
+
 	// SearchSemantic runs vector KNN in the database and returns ranked hits.
 	// The backend does the ranking (e.g. pgvector HNSW), so this scales
 	// without pulling all vectors into the app.

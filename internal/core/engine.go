@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -54,12 +55,15 @@ func (e *Engine) Write(ctx context.Context, in WriteInput) (*Note, error) {
 	existing, _ := e.store.Get(ctx, id)
 	if existing != nil && existing.ContentHash == hash && len(existing.Vector) > 0 {
 		vector = existing.Vector
-	} else {
-		v, err := e.embedder.Embed(ctx, embedText(in.Title, in.Body))
-		if err != nil {
-			return nil, fmt.Errorf("embed: %w", err)
-		}
+	} else if v, err := e.embedder.Embed(ctx, embedText(in.Title, in.Body)); err == nil {
 		vector = v
+	} else {
+		// Degraded write: the embedder is unreachable (e.g. LM Studio is
+		// down). Store the note without a vector — it stays keyword-
+		// searchable — and let a reembed backfill it later. /api/health
+		// reports missing_vectors; POST /api/reembed fixes them.
+		log.Printf("engram: embed failed for %q, storing without vector: %v", id, err)
+		vector = nil
 	}
 
 	n := Note{
@@ -159,9 +163,32 @@ func (e *Engine) keyword(ctx context.Context, query string, limit int) ([]Search
 	return hits, nil
 }
 
-// Reembed rebuilds vectors for every note (e.g. after an embedding-model
-// change). Returns the number re-embedded.
-func (e *Engine) Reembed(ctx context.Context) (int, error) {
+// Reembed rebuilds vectors. With onlyMissing it backfills just the notes
+// that have no vector (from degraded writes while the embedder was down);
+// otherwise it re-embeds every note (e.g. after an embedding-model change).
+// Returns the number re-embedded.
+func (e *Engine) Reembed(ctx context.Context, onlyMissing bool) (int, error) {
+	if onlyMissing {
+		ids, err := e.store.MissingVectorIDs(ctx)
+		if err != nil {
+			return 0, err
+		}
+		var n int
+		for _, id := range ids {
+			note, err := e.store.Get(ctx, id)
+			if err != nil {
+				return n, err
+			}
+			if note == nil {
+				continue
+			}
+			if err := e.reembedOne(ctx, *note); err != nil {
+				return n, err
+			}
+			n++
+		}
+		return n, nil
+	}
 	var n int
 	offset := 0
 	for {
@@ -173,14 +200,7 @@ func (e *Engine) Reembed(ctx context.Context) (int, error) {
 			break
 		}
 		for _, note := range batch {
-			v, err := e.embedder.Embed(ctx, embedText(note.Title, note.Body))
-			if err != nil {
-				return n, fmt.Errorf("reembed %q: %w", note.ID, err)
-			}
-			note.Vector = v
-			note.Links = parseLinks(note.Body)
-			note.ContentHash = hashBody(note.Body)
-			if err := e.store.Upsert(ctx, note); err != nil {
+			if err := e.reembedOne(ctx, note); err != nil {
 				return n, err
 			}
 			n++
@@ -188,6 +208,30 @@ func (e *Engine) Reembed(ctx context.Context) (int, error) {
 		offset += len(batch)
 	}
 	return n, nil
+}
+
+func (e *Engine) reembedOne(ctx context.Context, note Note) error {
+	v, err := e.embedder.Embed(ctx, embedText(note.Title, note.Body))
+	if err != nil {
+		return fmt.Errorf("reembed %q: %w", note.ID, err)
+	}
+	note.Vector = v
+	note.Links = parseLinks(note.Body)
+	note.ContentHash = hashBody(note.Body)
+	return e.store.Upsert(ctx, note)
+}
+
+// MissingVectors reports how many notes have no embedding (degraded writes
+// awaiting backfill).
+func (e *Engine) MissingVectors(ctx context.Context) (int, error) {
+	ids, err := e.store.MissingVectorIDs(ctx)
+	return len(ids), err
+}
+
+// ProbeEmbedder checks whether the embedding endpoint is reachable.
+func (e *Engine) ProbeEmbedder(ctx context.Context) error {
+	_, err := e.embedder.Embed(ctx, "health probe")
+	return err
 }
 
 // --- helpers ----------------------------------------------------------------

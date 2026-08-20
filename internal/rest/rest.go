@@ -33,13 +33,32 @@ func (a *API) Routes() *http.ServeMux {
 	return mux
 }
 
+// health reports service status. Always 200 when the store is reachable —
+// a down embedder is degraded operation, not an unhealthy service (writes
+// land without vectors; searches fall back to keyword). missing_vectors > 0
+// means degraded writes are awaiting a POST /api/reembed. Add ?probe=1 to
+// also test the embedding endpoint (costs one embed call; keep it out of
+// the container HEALTHCHECK so engram's health never depends on LM Studio).
 func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	n, err := a.eng.Count(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "notes": n})
+	missing, err := a.eng.MissingVectors(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp := map[string]any{"status": "ok", "notes": n, "missing_vectors": missing}
+	if r.URL.Query().Get("probe") != "" {
+		if err := a.eng.ProbeEmbedder(r.Context()); err != nil {
+			resp["embedder"] = "unreachable: " + err.Error()
+		} else {
+			resp["embedder"] = "ok"
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (a *API) search(w http.ResponseWriter, r *http.Request) {
@@ -139,8 +158,11 @@ func (a *API) links(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, bl)
 }
 
+// reembed backfills notes missing vectors (the default), or with ?all=1
+// re-embeds every note (after an embedding-model change).
 func (a *API) reembed(w http.ResponseWriter, r *http.Request) {
-	n, err := a.eng.Reembed(r.Context())
+	onlyMissing := r.URL.Query().Get("all") == ""
+	n, err := a.eng.Reembed(r.Context(), onlyMissing)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

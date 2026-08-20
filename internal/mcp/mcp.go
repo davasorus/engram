@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -17,15 +18,31 @@ import (
 
 // Adapter wires a core.Engine to an MCP server.
 type Adapter struct {
-	eng    *core.Engine
-	server *mcp.Server
+	eng     *core.Engine
+	server  *mcp.Server
+	allowed map[string]bool
 }
 
-func New(eng *core.Engine) *Adapter {
+// New wires the engine into an MCP server. allowedTools restricts the
+// exposed tool surface (nil or empty = all tools). Smaller local models
+// call tools more reliably when there are fewer to choose from, so an
+// agent-facing deployment typically wants e.g. mem_search,mem_read,mem_write.
+func New(eng *core.Engine, allowedTools []string) *Adapter {
 	s := mcp.NewServer(&mcp.Implementation{Name: "engram", Version: "0.1.0"}, nil)
-	a := &Adapter{eng: eng, server: s}
+	a := &Adapter{eng: eng, server: s, allowed: map[string]bool{}}
+	for _, t := range allowedTools {
+		if t = strings.ToLower(strings.TrimSpace(t)); t != "" {
+			a.allowed[t] = true
+		}
+	}
 	a.registerTools()
 	return a
+}
+
+// enabled reports whether a tool should be registered. An empty allowlist
+// means everything is enabled.
+func (a *Adapter) enabled(name string) bool {
+	return len(a.allowed) == 0 || a.allowed[name]
 }
 
 // Server exposes the underlying MCP server (for stdio runs).
@@ -69,84 +86,98 @@ type deleteIn struct {
 }
 
 func (a *Adapter) registerTools() {
-	mcp.AddTool(a.server, &mcp.Tool{
-		Name:        "mem_search",
-		Description: "Search the agent's memory by meaning (semantic) or keyword. Returns ranked notes with scores.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
-		hits, err := a.eng.Search(ctx, in.Query, in.Limit, in.Kind)
-		if err != nil {
-			return errResult(err), nil, nil
-		}
-		return jsonResult(hits), nil, nil
-	})
+	if a.enabled("mem_search") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_search",
+			Description: "Search the agent's memory by meaning (semantic) or keyword. Returns ranked notes with scores.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
+			hits, err := a.eng.Search(ctx, in.Query, in.Limit, in.Kind)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(hits), nil, nil
+		})
+	}
 
-	mcp.AddTool(a.server, &mcp.Tool{
-		Name:        "mem_read",
-		Description: "Read a note from memory by id, including its markdown body and outgoing links.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in readIn) (*mcp.CallToolResult, any, error) {
-		n, err := a.eng.Read(ctx, in.ID)
-		if err != nil {
-			return errResult(err), nil, nil
-		}
-		if n == nil {
-			return errResult(fmt.Errorf("note %q not found", in.ID)), nil, nil
-		}
-		return jsonResult(n), nil, nil
-	})
+	if a.enabled("mem_read") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_read",
+			Description: "Read a note from memory by id, including its markdown body and outgoing links.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in readIn) (*mcp.CallToolResult, any, error) {
+			n, err := a.eng.Read(ctx, in.ID)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			if n == nil {
+				return errResult(fmt.Errorf("note %q not found", in.ID)), nil, nil
+			}
+			return jsonResult(n), nil, nil
+		})
+	}
 
-	mcp.AddTool(a.server, &mcp.Tool{
-		Name:        "mem_write",
-		Description: "Create or update a memory note. The body is markdown; [[wikilinks]] are parsed into links, and the note is embedded for semantic search.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in writeIn) (*mcp.CallToolResult, any, error) {
-		n, err := a.eng.Write(ctx, core.WriteInput{ID: in.ID, Title: in.Title, Body: in.Body, Tags: in.Tags})
-		if err != nil {
-			return errResult(err), nil, nil
-		}
-		return jsonResult(n), nil, nil
-	})
+	if a.enabled("mem_write") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_write",
+			Description: "Create or update a memory note. The body is markdown; [[wikilinks]] are parsed into links, and the note is embedded for semantic search.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in writeIn) (*mcp.CallToolResult, any, error) {
+			n, err := a.eng.Write(ctx, core.WriteInput{ID: in.ID, Title: in.Title, Body: in.Body, Tags: in.Tags})
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(n), nil, nil
+		})
+	}
 
-	mcp.AddTool(a.server, &mcp.Tool{
-		Name:        "mem_patch",
-		Description: "Edit an existing note by replacing an exact, unique substring. Re-embeds and re-links automatically.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in patchIn) (*mcp.CallToolResult, any, error) {
-		n, err := a.eng.Patch(ctx, in.ID, in.OldStr, in.NewStr)
-		if err != nil {
-			return errResult(err), nil, nil
-		}
-		return jsonResult(n), nil, nil
-	})
+	if a.enabled("mem_patch") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_patch",
+			Description: "Edit an existing note by replacing an exact, unique substring. Re-embeds and re-links automatically.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in patchIn) (*mcp.CallToolResult, any, error) {
+			n, err := a.eng.Patch(ctx, in.ID, in.OldStr, in.NewStr)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(n), nil, nil
+		})
+	}
 
-	mcp.AddTool(a.server, &mcp.Tool{
-		Name:        "mem_links",
-		Description: "List backlinks: notes that link to the given note id or title.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in linksIn) (*mcp.CallToolResult, any, error) {
-		bl, err := a.eng.Backlinks(ctx, in.ID)
-		if err != nil {
-			return errResult(err), nil, nil
-		}
-		return jsonResult(bl), nil, nil
-	})
+	if a.enabled("mem_links") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_links",
+			Description: "List backlinks: notes that link to the given note id or title.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in linksIn) (*mcp.CallToolResult, any, error) {
+			bl, err := a.eng.Backlinks(ctx, in.ID)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(bl), nil, nil
+		})
+	}
 
-	mcp.AddTool(a.server, &mcp.Tool{
-		Name:        "mem_list",
-		Description: "List notes, most-recently-updated first.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listIn) (*mcp.CallToolResult, any, error) {
-		ns, err := a.eng.List(ctx, in.Limit, in.Offset)
-		if err != nil {
-			return errResult(err), nil, nil
-		}
-		return jsonResult(ns), nil, nil
-	})
+	if a.enabled("mem_list") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_list",
+			Description: "List notes, most-recently-updated first.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in listIn) (*mcp.CallToolResult, any, error) {
+			ns, err := a.eng.List(ctx, in.Limit, in.Offset)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(ns), nil, nil
+		})
+	}
 
-	mcp.AddTool(a.server, &mcp.Tool{
-		Name:        "mem_delete",
-		Description: "Delete a note by id.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, any, error) {
-		if err := a.eng.Delete(ctx, in.ID); err != nil {
-			return errResult(err), nil, nil
-		}
-		return jsonResult(map[string]string{"deleted": in.ID}), nil, nil
-	})
+	if a.enabled("mem_delete") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_delete",
+			Description: "Delete a note by id.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, any, error) {
+			if err := a.eng.Delete(ctx, in.ID); err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(map[string]string{"deleted": in.ID}), nil, nil
+		})
+	}
 }
 
 // --- result helpers ---------------------------------------------------------

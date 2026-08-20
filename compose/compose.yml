@@ -10,7 +10,7 @@
 
 services:
   db:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
     container_name: engram-db
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-engram}"
@@ -44,6 +44,8 @@ services:
       # On Podman/WSL: host.containers.internal; on Docker Desktop: host.docker.internal.
       ENGRAM_EMBED_URL: "${ENGRAM_EMBED_URL:-http://host.containers.internal:1234}"
       ENGRAM_EMBED_MODEL: "${ENGRAM_EMBED_MODEL:-text-embedding-nomic-embed-text-v1.5}"
+      # MCP tool allowlist (empty = all). See .env.example.
+      ENGRAM_MCP_TOOLS: "${ENGRAM_MCP_TOOLS:-}"
     healthcheck:
       test: ["CMD", "/engram", "-healthcheck", "-addr", ":8088"]
       interval: 30s
