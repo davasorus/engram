@@ -1,0 +1,16 @@
+{{define "title"}}engram — {{.Count}} notes{{end}}
+{{define "content"}}
+<h1>Memory <span class="dim">({{.Count}} notes)</span></h1>
+<ul class="notelist">
+{{range .Notes}}
+  <li>
+    <a href="/note/{{.ID}}">{{.Title}}</a>
+    <span class="meta">updated {{.Updated.Format "2006-01-02 15:04"}}</span>
+    {{if .Tags}}<span class="tags">{{range .Tags}}<span class="tag">{{.}}</span>{{end}}</span>{{end}}
+  </li>
+{{else}}
+  <li class="dim">No notes yet. The agent will fill this in — or <a href="/new">create one</a>.</li>
+{{end}}
+</ul>
+{{end}}
+{{template "base" .}}

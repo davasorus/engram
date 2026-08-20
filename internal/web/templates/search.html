@@ -1,0 +1,8 @@
+{{define "title"}}search — engram{{end}}
+{{define "content"}}
+<h1>Search {{if .Query}}<span class="dim">“{{.Query}}”</span>{{end}}</h1>
+<div id="search-results">
+  {{template "search_results" .}}
+</div>
+{{end}}
+{{template "base" .}}

@@ -1,0 +1,35 @@
+{{define "base"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{block "title" .}}engram{{end}}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.3/dist/htmx.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">engram</a>
+  <div class="searchform">
+    <input type="search" name="q" placeholder="search memory…"
+           hx-get="/frag/search" hx-trigger="keyup changed delay:300ms, search"
+           hx-target="#search-results" hx-swap="innerHTML"
+           hx-include="[name='kind']" value="{{if .Query}}{{.Query}}{{end}}">
+    <select name="kind" hx-get="/frag/search" hx-trigger="change"
+            hx-target="#search-results" hx-include="[name='q']">
+      <option value="semantic">semantic</option>
+      <option value="keyword">keyword</option>
+    </select>
+  </div>
+  <a class="newbtn" href="/new">+ new</a>
+</header>
+<main>
+{{block "content" .}}{{end}}
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>{{end}}

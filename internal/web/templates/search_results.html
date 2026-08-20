@@ -1,0 +1,19 @@
+{{define "search_results"}}
+{{if .Query}}
+  {{if .Hits}}
+  <ul class="hitlist">
+  {{range .Hits}}
+    <li>
+      <a href="/note/{{.Note.ID}}">{{.Note.Title}}</a>
+      <span class="score">{{.Kind}} · {{printf "%.3f" .Score}}</span>
+      <p class="excerpt">{{.Note.Body | printf "%.200s"}}…</p>
+    </li>
+  {{end}}
+  </ul>
+  {{else}}
+  <p class="dim">No matches.</p>
+  {{end}}
+{{else}}
+  <p class="dim">Type a query above. Semantic finds by meaning; keyword finds exact matches.</p>
+{{end}}
+{{end}}

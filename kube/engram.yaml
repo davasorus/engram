@@ -1,0 +1,132 @@
+# engram — Kubernetes-shaped manifests (engram + pgvector).
+#
+#   Podman:      podman play kube kube/engram.yaml
+#   Kubernetes:  kubectl apply -f kube/engram.yaml
+#
+# Two workloads: a pgvector Postgres with a persistent volume, and the engram
+# service. engram waits for Postgres via its own connect-retry loop, so start
+# order is not critical.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: engram-db
+  labels: { app: engram }
+type: Opaque
+stringData:
+  POSTGRES_USER: engram
+  POSTGRES_PASSWORD: change-me
+  POSTGRES_DB: engram
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: engram-pgdata
+  labels: { app: engram }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engram-db
+  labels: { app: engram, component: db }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: engram, component: db }
+  template:
+    metadata:
+      labels: { app: engram, component: db }
+    spec:
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          envFrom:
+            - secretRef: { name: engram-db }
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "engram", "-d", "engram"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: pgdata
+          persistentVolumeClaim:
+            claimName: engram-pgdata
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: engram-db
+  labels: { app: engram, component: db }
+spec:
+  selector: { app: engram, component: db }
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engram
+  labels: { app: engram, component: app }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: engram, component: app }
+  template:
+    metadata:
+      labels: { app: engram, component: app }
+    spec:
+      containers:
+        - name: engram
+          image: engram:local   # build/push this image; or use your registry ref
+          env:
+            - name: ENGRAM_ADDR
+              value: ":8088"
+            - name: ENGRAM_DIMS
+              value: "768"
+            - name: ENGRAM_EMBED_URL
+              value: "http://host.containers.internal:1234"
+            - name: ENGRAM_EMBED_MODEL
+              value: "text-embedding-nomic-embed-text-v1.5"
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: engram-db, key: POSTGRES_USER } }
+            - name: DB_PASS
+              valueFrom: { secretKeyRef: { name: engram-db, key: POSTGRES_PASSWORD } }
+            - name: DB_NAME
+              valueFrom: { secretKeyRef: { name: engram-db, key: POSTGRES_DB } }
+            - name: ENGRAM_DSN
+              value: "postgres://$(DB_USER):$(DB_PASS)@engram-db:5432/$(DB_NAME)?sslmode=disable"
+          ports:
+            - containerPort: 8088
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8088 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /api/health, port: 8088 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: engram
+  labels: { app: engram, component: app }
+spec:
+  type: NodePort
+  selector: { app: engram, component: app }
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088
+      nodePort: 30088

@@ -1,0 +1,56 @@
+# engram — the agent's memory service + its Postgres/pgvector database.
+#
+# Two services, fully declared. Nothing is hand-installed; `up` brings the
+# whole stack online.
+#
+#   Podman:  podman-compose -f compose/compose.yml up -d --build
+#   Docker:  docker compose  -f compose/compose.yml up -d --build
+#
+# Persistence is the Postgres volume (pgdata). That volume is your backup unit.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: engram-db
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-engram}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-engram}"
+      POSTGRES_DB: "${POSTGRES_DB:-engram}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-engram} -d ${POSTGRES_DB:-engram}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  engram:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: engram:local
+    container_name: engram
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${ENGRAM_PORT:-8088}:8088"
+    environment:
+      ENGRAM_ADDR: ":8088"
+      ENGRAM_DSN: "postgres://${POSTGRES_USER:-engram}:${POSTGRES_PASSWORD:-engram}@db:5432/${POSTGRES_DB:-engram}?sslmode=disable"
+      ENGRAM_DIMS: "${ENGRAM_DIMS:-768}"
+      # Embeddings endpoint. From a container, use the host's reachable address.
+      # On Podman/WSL: host.containers.internal; on Docker Desktop: host.docker.internal.
+      ENGRAM_EMBED_URL: "${ENGRAM_EMBED_URL:-http://host.containers.internal:1234}"
+      ENGRAM_EMBED_MODEL: "${ENGRAM_EMBED_MODEL:-text-embedding-nomic-embed-text-v1.5}"
+    healthcheck:
+      test: ["CMD", "/engram", "-healthcheck", "-addr", ":8088"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  pgdata:

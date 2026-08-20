@@ -1,0 +1,37 @@
+{{define "title"}}edit — engram{{end}}
+{{define "content"}}
+<div class="editor" data-id="{{.Note.ID}}" x-data="wikilinks()">
+  <input id="ed-title" class="ed-title" name="title" placeholder="Title" value="{{.Note.Title}}">
+  <input id="ed-tags" class="ed-tags" name="tags" placeholder="tags, comma, separated"
+         value="{{range $i,$t := .Note.Tags}}{{if $i}}, {{end}}{{$t}}{{end}}">
+
+  <div class="ed-cols">
+    <div class="ed-body-wrap" style="position:relative">
+      <textarea id="ed-body" class="ed-body" name="body"
+                placeholder='Write markdown… [[wikilinks]], $math$, ```mermaid```'
+                hx-post="/preview" hx-trigger="keyup changed delay:300ms"
+                hx-target="#ed-preview" hx-swap="innerHTML"
+                @keyup="onKeyup($event)" @keydown="onKeydown($event)"
+                x-ref="ta">{{.Note.Body}}</textarea>
+
+      <!-- Alpine-driven wikilink autocomplete dropdown -->
+      <div class="wl-menu" x-show="open" x-cloak
+           :style="`left:${x}px; top:${y}px`">
+        <template x-for="(item, i) in items" :key="item.id">
+          <div :class="{active: i === active}" @click="choose(item)"
+               @mouseenter="active = i" x-text="item.title"></div>
+        </template>
+      </div>
+    </div>
+
+    <div id="ed-preview" class="ed-preview rendered">{{rendermd .Note.Body}}</div>
+  </div>
+
+  <div class="ed-actions">
+    <button @click="save()">save</button>
+    <a href="{{if .Note.ID}}/note/{{.Note.ID}}{{else}}/{{end}}">cancel</a>
+    <span class="dim" x-text="status"></span>
+  </div>
+</div>
+{{end}}
+{{template "base" .}}

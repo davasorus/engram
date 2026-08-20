@@ -1,0 +1,9 @@
+# local env (holds the DB password)
+compose/.env
+# build output
+/engram
+/dist/
+# editor/OS noise
+.DS_Store
+*.swp
+*~

@@ -1,0 +1,4 @@
+.git
+compose/.env
+*.md
+/dist

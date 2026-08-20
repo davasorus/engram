@@ -1,0 +1,32 @@
+# golangci-lint configuration for engram.
+# Run locally:  golangci-lint run
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck      # unchecked errors
+    - govet         # suspicious constructs
+    - ineffassign   # ineffectual assignments
+    - staticcheck   # the big one: bugs, simplifications, deprecations
+    - unused        # unused code
+    - misspell      # common spelling mistakes in comments/strings
+    - gofmt         # formatting
+    - goimports     # import grouping/ordering
+    - bodyclose     # http response bodies closed
+    - errorlint     # correct error wrapping/comparison
+    - unconvert     # unnecessary conversions
+
+issues:
+  # Don't fail on the well-known "error return value not checked" in defers
+  # like `defer f.Close()` — common and low-risk.
+  exclude-rules:
+    - linters: [errcheck]
+      source: "defer "
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/davasorus/engram

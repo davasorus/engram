@@ -1,0 +1,26 @@
+{{define "title"}}{{.Note.Title}} — engram{{end}}
+{{define "content"}}
+<article class="note">
+  <div class="note-head">
+    <h1>{{.Note.Title}}</h1>
+    <a class="editbtn" href="/edit/{{.Note.ID}}">edit</a>
+  </div>
+  {{if .Note.Tags}}<div class="tags">{{range .Note.Tags}}<span class="tag">{{.}}</span>{{end}}</div>{{end}}
+  <div class="rendered">{{rendermd .Note.Body}}</div>
+</article>
+
+{{if .Note.Links}}
+<section class="links">
+  <h3>Links to</h3>
+  <ul>{{range .Note.Links}}<li><a href="/note/{{.}}">{{.}}</a></li>{{end}}</ul>
+</section>
+{{end}}
+
+{{if .Backlinks}}
+<section class="links">
+  <h3>Linked from</h3>
+  <ul>{{range .Backlinks}}<li><a href="/note/{{.ID}}">{{.Title}}</a></li>{{end}}</ul>
+</section>
+{{end}}
+{{end}}
+{{template "base" .}}
