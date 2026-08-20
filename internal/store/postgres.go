@@ -140,7 +140,7 @@ ON CONFLICT (id) DO UPDATE SET
 }
 
 func (p *Postgres) Get(ctx context.Context, id string) (*core.Note, error) {
-	n, err := p.scanOne(ctx, `SELECT id,title,body,frontmatter,tags,content_hash,created,updated,embedding FROM notes WHERE id=$1`, id)
+	n, err := p.scanOne(ctx, `SELECT `+noteColumns+` FROM notes WHERE id=$1`, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -150,6 +150,11 @@ func (p *Postgres) Get(ctx context.Context, id string) (*core.Note, error) {
 	n.Links, _ = p.outgoingLinks(ctx, id)
 	return n, nil
 }
+
+// noteColumns is the exact column list scanOne/scanMany decode — every query
+// feeding them MUST use it, in this order. (A query with a different column
+// count fails at runtime with "field descriptions must equal destinations".)
+const noteColumns = "id,title,body,frontmatter,tags,content_hash,created,updated,embedding"
 
 func (p *Postgres) scanOne(ctx context.Context, q string, args ...any) (*core.Note, error) {
 	row := p.pool.QueryRow(ctx, q, args...)
@@ -195,7 +200,7 @@ func (p *Postgres) List(ctx context.Context, limit, offset int) ([]core.Note, er
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := p.pool.Query(ctx, `SELECT id,title,body,frontmatter,tags,content_hash,created,updated,embedding FROM notes ORDER BY updated DESC LIMIT $1 OFFSET $2`, limit, offset)
+	rows, err := p.pool.Query(ctx, `SELECT `+noteColumns+` FROM notes ORDER BY updated DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -285,9 +290,7 @@ func (p *Postgres) KeywordSearch(ctx context.Context, q string, limit int) ([]co
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := p.pool.Query(ctx, `
-SELECT id,title,body,frontmatter,tags,content_hash,created,updated
-FROM notes
+	rows, err := p.pool.Query(ctx, `SELECT `+noteColumns+` FROM notes
 WHERE to_tsvector('english', title || ' ' || body) @@ plainto_tsquery('english', $1)
    OR lower(title) LIKE '%' || lower($1) || '%'
 ORDER BY updated DESC
