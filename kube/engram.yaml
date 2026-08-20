@@ -155,6 +155,7 @@ spec:
       containers:
         - name: engram
           image: ghcr.io/davasorus/engram:latest # ships as a release artifact; latest keeps it evergreen
+          imagePullPolicy: Always
           envFrom:
             - configMapRef: { name: engram-config }
           env:
