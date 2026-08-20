@@ -3,10 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{block "title" .}}engram{{end}}</title>
+<title>{{template "title" .}}</title>
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.3/dist/htmx.min.js"></script>
+<script defer src="/static/app.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -26,10 +27,9 @@
   <a class="newbtn" href="/new">+ new</a>
 </header>
 <main>
-{{block "content" .}}{{end}}
+{{template "content" .}}
 </main>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-<script src="/static/app.js"></script>
 </body>
 </html>{{end}}

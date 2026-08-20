@@ -32,6 +32,13 @@ document.addEventListener("DOMContentLoaded", function () { renderRich(document)
 document.body && document.addEventListener("htmx:afterSwap", function (e) { renderRich(e.target); });
 
 // --- Alpine component: wikilink autocomplete --------------------------------
+// Registered via the alpine:init event so the component is guaranteed to be
+// defined before Alpine scans the DOM for x-data — otherwise a load-order race
+// can leave x-data="wikilinks()" undefined and the editor renders inert.
+document.addEventListener("alpine:init", function () {
+  window.Alpine.data("wikilinks", wikilinks);
+});
+
 function wikilinks() {
   return {
     open: false, items: [], active: 0, x: 0, y: 0, triggerPos: -1, status: "",

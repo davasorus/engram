@@ -21,18 +21,45 @@ import (
 var assets embed.FS
 
 type Server struct {
-	eng  *core.Engine
-	tmpl *template.Template
+	eng   *core.Engine
+	pages map[string]*template.Template // page name -> base+page+fragments
+	frags *template.Template            // standalone fragments (search_results)
 }
 
 func New(eng *core.Engine) (*Server, error) {
-	t, err := template.New("").Funcs(template.FuncMap{
-		"rendermd": func(s string) template.HTML { return template.HTML(RenderMarkdown(s)) },
-	}).ParseFS(assets, "templates/*.html")
+	funcs := template.FuncMap{
+		"rendermd": func(v any) template.HTML {
+			s, _ := v.(string)
+			return template.HTML(RenderMarkdown(s))
+		},
+	}
+
+	// Each page template defines {{"content"}} and {{"title"}}. Because those
+	// names are shared across page files, parsing all pages into ONE template
+	// set makes the last-parsed page silently overwrite the others' blocks.
+	// So we build a SEPARATE template set per page, each containing only
+	// base.html + shared partials + that ONE page. This isolates the content
+	// block so every page renders its own.
+	shared := []string{"templates/base.html", "templates/search_results.html"}
+	pageFiles := []string{"list.html", "view.html", "search.html", "edit.html"}
+
+	pages := map[string]*template.Template{}
+	for _, p := range pageFiles {
+		files := append(append([]string{}, shared...), "templates/"+p)
+		t, err := template.New("").Funcs(funcs).ParseFS(assets, files...)
+		if err != nil {
+			return nil, err
+		}
+		pages[p] = t
+	}
+
+	// Fragments render standalone (no base shell) for HTMX swaps.
+	frags, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/search_results.html")
 	if err != nil {
 		return nil, err
 	}
-	return &Server{eng: eng, tmpl: t}, nil
+
+	return &Server{eng: eng, pages: pages, frags: frags}, nil
 }
 
 func (s *Server) Routes() *http.ServeMux {
@@ -132,8 +159,16 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
+	t, ok := s.pages[name]
+	if !ok {
+		http.Error(w, "unknown page: "+name, http.StatusInternalServerError)
+		return
+	}
 	var buf bytes.Buffer
-	if err := s.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+	// The page file's top level is {{template "base" .}}, and base pulls in the
+	// page's {{"content"}}/{{"title"}} blocks. So the entry point is the page
+	// file itself.
+	if err := t.ExecuteTemplate(&buf, name, data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -145,7 +180,7 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 // fragment, no page shell) for HTMX swaps.
 func (s *Server) renderFragment(w http.ResponseWriter, name string, data any) {
 	var buf bytes.Buffer
-	if err := s.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+	if err := s.frags.ExecuteTemplate(&buf, name, data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
