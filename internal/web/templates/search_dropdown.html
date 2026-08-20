@@ -1,0 +1,23 @@
+{{define "search_dropdown"}}
+{{if .Query}}
+  {{if .Results}}
+  <div class="qs-count">{{.Count}} match{{if ne .Count 1}}es{{end}} · {{.Kind}}</div>
+  <ul class="qs-list">
+  {{range .Results}}
+    <li>
+      <a href="/note/{{.ID}}">
+        <span class="qs-title">{{.Title}}</span>
+        <span class="strength strength-{{.Label}}" title="{{.Kind}} · {{printf "%.3f" .Score}}">
+          <span class="strength-bar" style="width:{{.Strength}}%"></span>
+        </span>
+      </a>
+      <p class="qs-excerpt">{{.Excerpt}}</p>
+    </li>
+  {{end}}
+  </ul>
+  <a class="qs-viewall" href="/search?q={{.Query}}&kind={{.Kind}}">See all results →</a>
+  {{else}}
+  <div class="qs-empty">No matches for “{{.Query}}”.</div>
+  {{end}}
+{{end}}
+{{end}}

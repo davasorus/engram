@@ -40,7 +40,7 @@ func New(eng *core.Engine) (*Server, error) {
 	// So we build a SEPARATE template set per page, each containing only
 	// base.html + shared partials + that ONE page. This isolates the content
 	// block so every page renders its own.
-	shared := []string{"templates/base.html", "templates/search_results.html"}
+	shared := []string{"templates/base.html", "templates/search_results.html", "templates/search_dropdown.html"}
 	pageFiles := []string{"list.html", "view.html", "search.html", "edit.html"}
 
 	pages := map[string]*template.Template{}
@@ -54,7 +54,7 @@ func New(eng *core.Engine) (*Server, error) {
 	}
 
 	// Fragments render standalone (no base shell) for HTMX swaps.
-	frags, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/search_results.html")
+	frags, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/search_results.html", "templates/search_dropdown.html")
 	if err != nil {
 		return nil, err
 	}
@@ -109,18 +109,31 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		hits, _ = s.eng.Search(r.Context(), q, limit, kind)
 	}
-	s.render(w, "search.html", map[string]any{"Query": q, "Kind": kind, "Hits": hits})
+	vms := toVMs(hits)
+	s.render(w, "search.html", map[string]any{"Query": q, "Kind": kind, "Results": vms, "Count": len(vms)})
 }
 
-// searchFragment returns ONLY the results list (for HTMX search-as-you-type).
+// searchFragment serves result fragments for HTMX. mode=dropdown renders the
+// compact nav quick-search; otherwise the full /search results list.
 func (s *Server) searchFragment(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	kind := r.URL.Query().Get("kind")
+	mode := r.URL.Query().Get("mode")
 	var hits []core.SearchHit
 	if q != "" {
-		hits, _ = s.eng.Search(r.Context(), q, 0, kind)
+		limit := 0
+		if mode == "dropdown" {
+			limit = 6
+		}
+		hits, _ = s.eng.Search(r.Context(), q, limit, kind)
 	}
-	s.renderFragment(w, "search_results", map[string]any{"Query": q, "Kind": kind, "Hits": hits})
+	vms := toVMs(hits)
+	data := map[string]any{"Query": q, "Kind": kind, "Results": vms, "Count": len(vms)}
+	if mode == "dropdown" {
+		s.renderFragment(w, "search_dropdown", data)
+		return
+	}
+	s.renderFragment(w, "search_results", data)
 }
 
 func (s *Server) edit(w http.ResponseWriter, r *http.Request) {

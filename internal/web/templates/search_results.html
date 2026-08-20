@@ -1,19 +1,31 @@
 {{define "search_results"}}
 {{if .Query}}
-  {{if .Hits}}
+  {{if .Results}}
+  <div class="results-meta">{{.Count}} result{{if ne .Count 1}}s{{end}} for “{{.Query}}” · <span class="dim">{{.Kind}} search</span></div>
   <ul class="hitlist">
-  {{range .Hits}}
+  {{range .Results}}
     <li>
-      <a href="/note/{{.Note.ID}}">{{.Note.Title}}</a>
-      <span class="score">{{.Kind}} · {{printf "%.3f" .Score}}</span>
-      <p class="excerpt">{{.Note.Body | printf "%.200s"}}…</p>
+      <div class="hit-head">
+        <a class="hit-title" href="/note/{{.ID}}">{{.Title}}</a>
+        <span class="strength strength-{{.Label}}" title="score {{printf "%.3f" .Score}}">
+          <span class="strength-bar" style="width:{{.Strength}}%"></span>
+          <span class="strength-label">{{.Label}}</span>
+        </span>
+      </div>
+      <p class="excerpt">{{.Excerpt}}</p>
     </li>
   {{end}}
   </ul>
   {{else}}
-  <p class="dim">No matches.</p>
+  <div class="empty-state">
+    <p>No matches for “{{.Query}}”.</p>
+    <p class="dim">Try {{if eq .Kind "keyword"}}semantic search (finds by meaning){{else}}different words, or keyword search for exact terms{{end}}.</p>
+  </div>
   {{end}}
 {{else}}
-  <p class="dim">Type a query above. Semantic finds by meaning; keyword finds exact matches.</p>
+  <div class="empty-state dim">
+    <p>Search your memory.</p>
+    <p><strong>Semantic</strong> finds notes by meaning — even if they don't share your exact words. <strong>Keyword</strong> matches literal terms.</p>
+  </div>
 {{end}}
 {{end}}

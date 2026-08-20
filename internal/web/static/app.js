@@ -37,7 +37,32 @@ document.body && document.addEventListener("htmx:afterSwap", function (e) { rend
 // can leave x-data="wikilinks()" undefined and the editor renders inert.
 document.addEventListener("alpine:init", function () {
   window.Alpine.data("wikilinks", wikilinks);
+  window.Alpine.data("quicksearch", quicksearch);
+  window.Alpine.data("fullsearch", fullsearch);
 });
+
+// Nav quick-search: dropdown of results from any page.
+function quicksearch() {
+  return {
+    open: false,
+    close() { this.open = false; },
+    clear() { this.$refs.q.value = ""; document.getElementById("qs-dropdown").innerHTML = ""; this.open = false; },
+    rerun() { this.$refs.q.dispatchEvent(new Event("keyup")); },   // re-fire htmx with new kind
+    goFull() {
+      var q = this.$refs.q.value.trim();
+      if (!q) return;
+      var kind = document.querySelector("[name=qs-kind]").value;
+      window.location.href = "/search?q=" + encodeURIComponent(q) + "&kind=" + kind;
+    },
+  };
+}
+
+// Full /search page: re-run search when the mode radio changes.
+function fullsearch() {
+  return {
+    rerun() { this.$refs.q.dispatchEvent(new Event("keyup")); },
+  };
+}
 
 function wikilinks() {
   return {

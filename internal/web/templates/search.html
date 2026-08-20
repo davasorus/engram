@@ -1,8 +1,24 @@
 {{define "title"}}search — engram{{end}}
 {{define "content"}}
-<h1>Search {{if .Query}}<span class="dim">“{{.Query}}”</span>{{end}}</h1>
-<div id="search-results">
-  {{template "search_results" .}}
+<div class="searchpage" x-data="fullsearch()">
+  <h1>Search</h1>
+  <div class="searchpage-controls">
+    <input type="search" class="searchpage-input" name="q" placeholder="search your memory…"
+           autocomplete="off" x-ref="q"
+           hx-get="/frag/search" hx-trigger="keyup changed delay:250ms, search"
+           hx-target="#search-results" hx-swap="innerHTML"
+           hx-vals='js:{kind: document.querySelector("[name=sp-kind]").value}'
+           hx-indicator="#sp-spin"
+           value="{{if .Query}}{{.Query}}{{end}}">
+    <div class="searchpage-modes">
+      <label><input type="radio" name="sp-kind" value="semantic" checked @change="rerun()"> semantic <span class="dim">(by meaning)</span></label>
+      <label><input type="radio" name="sp-kind" value="keyword" @change="rerun()"> keyword <span class="dim">(exact)</span></label>
+      <span id="sp-spin" class="htmx-indicator sp-spin">searching…</span>
+    </div>
+  </div>
+  <div id="search-results">
+    {{template "search_results" .}}
+  </div>
 </div>
 {{end}}
 {{template "base" .}}

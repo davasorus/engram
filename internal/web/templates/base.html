@@ -13,17 +13,32 @@
 <body>
 <header class="topbar">
   <a class="brand" href="/">engram</a>
-  <div class="searchform">
-    <input type="search" name="q" placeholder="search memory…"
-           hx-get="/frag/search" hx-trigger="keyup changed delay:300ms, search"
-           hx-target="#search-results" hx-swap="innerHTML"
-           hx-include="[name='kind']" value="{{if .Query}}{{.Query}}{{end}}">
-    <select name="kind" hx-get="/frag/search" hx-trigger="change"
-            hx-target="#search-results" hx-include="[name='q']">
-      <option value="semantic">semantic</option>
-      <option value="keyword">keyword</option>
-    </select>
+
+  <!-- Quick search: works from ANY page. Results drop down below the box.
+       Enter jumps to the full /search page. Escape clears. -->
+  <div class="quicksearch" x-data="quicksearch()" @keydown.escape="clear()" @click.outside="close()">
+    <div class="qs-inputrow">
+      <input type="search" name="q" placeholder="search memory…  (Enter for full results)"
+             autocomplete="off"
+             x-ref="q"
+             hx-get="/frag/search"
+             hx-trigger="keyup changed delay:250ms"
+             hx-target="#qs-dropdown" hx-swap="innerHTML"
+             hx-vals='js:{mode:"dropdown", kind: document.querySelector("[name=qs-kind]").value}'
+             hx-indicator="#qs-spin"
+             @focus="open=true" @keydown.enter="goFull()"
+             value="{{if .Query}}{{.Query}}{{end}}">
+      <select name="qs-kind" class="qs-kind"
+              @change="rerun()"
+              title="semantic = by meaning · keyword = exact words">
+        <option value="semantic">semantic</option>
+        <option value="keyword">keyword</option>
+      </select>
+      <span id="qs-spin" class="qs-spin htmx-indicator">searching…</span>
+    </div>
+    <div id="qs-dropdown" class="qs-dropdown" x-show="open" x-cloak></div>
   </div>
+
   <a class="newbtn" href="/new">+ new</a>
 </header>
 <main>

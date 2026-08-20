@@ -3,11 +3,14 @@ name: release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
-  contents: write   # create GitHub Releases
-  packages: write   # push images to GHCR
+  contents: write # create GitHub Releases
+  packages: write # push images to GHCR
+
+concurrency:
+  group: release-${{ github.ref }}
 
 jobs:
   goreleaser:
@@ -15,11 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0   # GoReleaser needs full history/tags
+          fetch-depth: 0 # GoReleaser needs full history/tags
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: "1.25"
           cache: true
 
       - name: Set up QEMU (multi-arch)
@@ -38,7 +41,7 @@ jobs:
       - name: GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
-          version: latest
+          version: "~> v2" # latest GoReleaser v2.x, won't jump majors
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

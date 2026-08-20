@@ -5,7 +5,7 @@ updates:
     schedule:
       interval: daily
     commit-message:
-      prefix: "chore" # Prefixed commit message for NuGet updates
+      prefix: "chore"
       include: "scope"
     groups:
       go-deps:
@@ -16,13 +16,16 @@ updates:
     schedule:
       interval: daily
     commit-message:
-      prefix: "chore" # Prefixed commit message for NuGet updates
+      prefix: "chore"
       include: "scope"
+    groups:
+      actions:
+        patterns: ["*"]
 
   - package-ecosystem: docker
-    directory: "/"
+    directory: / # must be the dir containing your Dockerfile/Containerfile
     schedule:
       interval: daily
     commit-message:
-      prefix: "chore" # Prefixed commit message for NuGet updates
+      prefix: "chore"
       include: "scope"
