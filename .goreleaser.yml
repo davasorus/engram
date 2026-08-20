@@ -30,7 +30,7 @@ dockers:
   - image_templates:
       - "ghcr.io/davasorus/engram:{{ .Version }}-amd64"
     use: buildx
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.source=https://github.com/davasorus/engram"
@@ -39,7 +39,7 @@ dockers:
   - image_templates:
       - "ghcr.io/davasorus/engram:{{ .Version }}-arm64"
     use: buildx
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.source=https://github.com/davasorus/engram"
