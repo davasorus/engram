@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: "chore" # Prefixed commit message for NuGet updates
+      include: "scope"
+    groups:
+      go-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: "chore" # Prefixed commit message for NuGet updates
+      include: "scope"
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: "chore" # Prefixed commit message for NuGet updates
+      include: "scope"
