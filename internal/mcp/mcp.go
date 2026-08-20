@@ -10,8 +10,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/davasorus/engram/internal/core"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/davasorus/engram/internal/core"
 )
 
 // Adapter wires a core.Engine to an MCP server.

@@ -143,11 +143,19 @@ func TestWriteReadRoundTrip(t *testing.T) {
 	}
 }
 
+// mustWrite seeds a note, failing the test on error.
+func mustWrite(t *testing.T, e *core.Engine, ctx context.Context, in core.WriteInput) {
+	t.Helper()
+	if _, err := e.Write(ctx, in); err != nil {
+		t.Fatalf("seed write %q: %v", in.Title, err)
+	}
+}
+
 func TestSemanticSearchRanks(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()
-	e.Write(ctx, core.WriteInput{Title: "Postgres backups", Body: "pg_dump and WAL archiving for postgres backups"})
-	e.Write(ctx, core.WriteInput{Title: "Cat facts", Body: "cats sleep a lot and purr"})
+	mustWrite(t, e, ctx, core.WriteInput{Title: "Postgres backups", Body: "pg_dump and WAL archiving for postgres backups"})
+	mustWrite(t, e, ctx, core.WriteInput{Title: "Cat facts", Body: "cats sleep a lot and purr"})
 	hits, err := e.Search(ctx, "postgres backup strategy", 5, "semantic")
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +168,7 @@ func TestSemanticSearchRanks(t *testing.T) {
 func TestKeywordSearch(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()
-	e.Write(ctx, core.WriteInput{Title: "Docker notes", Body: "podman play kube is handy"})
+	mustWrite(t, e, ctx, core.WriteInput{Title: "Docker notes", Body: "podman play kube is handy"})
 	hits, err := e.Search(ctx, "podman", 5, "keyword")
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +181,7 @@ func TestKeywordSearch(t *testing.T) {
 func TestPatch(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()
-	e.Write(ctx, core.WriteInput{Title: "Config", Body: "port is 27123 currently"})
+	mustWrite(t, e, ctx, core.WriteInput{Title: "Config", Body: "port is 27123 currently"})
 	n, err := e.Patch(ctx, "config", "27123", "27124")
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +189,7 @@ func TestPatch(t *testing.T) {
 	if n.Body != "port is 27124 currently" {
 		t.Fatalf("patch body: %q", n.Body)
 	}
-	e.Write(ctx, core.WriteInput{Title: "Dup", Body: "aa aa"})
+	mustWrite(t, e, ctx, core.WriteInput{Title: "Dup", Body: "aa aa"})
 	if _, err := e.Patch(ctx, "dup", "aa", "bb"); err == nil {
 		t.Fatal("expected ambiguity error")
 	}
@@ -193,8 +201,8 @@ func TestPatch(t *testing.T) {
 func TestBacklinks(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()
-	e.Write(ctx, core.WriteInput{Title: "Target", Body: "the target note"})
-	e.Write(ctx, core.WriteInput{Title: "Source", Body: "see [[Target]] for details"})
+	mustWrite(t, e, ctx, core.WriteInput{Title: "Target", Body: "the target note"})
+	mustWrite(t, e, ctx, core.WriteInput{Title: "Source", Body: "see [[Target]] for details"})
 	bl, err := e.Backlinks(ctx, "target")
 	if err != nil {
 		t.Fatal(err)

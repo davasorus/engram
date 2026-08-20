@@ -1,3 +1,5 @@
+# golangci-lint v2 configuration for engram (golangci-lint >= 2.0).
+# Run locally:  golangci-lint run
 version: "2"
 
 run:
@@ -5,16 +7,18 @@ run:
   tests: true
 
 linters:
+  # v2 note: staticcheck now bundles the old gosimple/stylecheck; gofmt and
+  # goimports moved to the formatters section below.
   enable:
-    - errcheck
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - misspell
-    - bodyclose
-    - errorlint
-    - unconvert
+    - errcheck # unchecked errors
+    - govet # suspicious constructs
+    - ineffassign # ineffectual assignments
+    - staticcheck # bugs, simplifications, deprecations
+    - unused # unused code
+    - misspell # common spelling mistakes in comments/strings
+    - bodyclose # http response bodies closed
+    - errorlint # correct error wrapping/comparison
+    - unconvert # unnecessary conversions
 
 formatters:
   enable:

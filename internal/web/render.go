@@ -54,8 +54,10 @@ func RenderMarkdown(body string) string {
 		sub := calloutRe.FindStringSubmatch(m)
 		typ := strings.ToLower(sub[1])
 		title := sub[2]
-		if title == "" {
-			title = strings.Title(typ)
+		if title == "" && typ != "" {
+			// strings.Title is deprecated; callout types are plain ASCII
+			// keywords (note, warning, tip...), so capitalize manually.
+			title = strings.ToUpper(typ[:1]) + typ[1:]
 		}
 		return "> <div class=\"callout callout-" + typ + "\"><div class=\"callout-title\">" + html.EscapeString(title) + "</div>"
 	})

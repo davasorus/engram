@@ -13,11 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davasorus/engram/internal/core"
-	"github.com/davasorus/engram/internal/store"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/davasorus/engram/internal/core"
+	"github.com/davasorus/engram/internal/store"
 )
 
 // startPG launches a pgvector container and returns a connected store.

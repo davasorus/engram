@@ -2,10 +2,11 @@ package web
 
 import (
 	"context"
-	"github.com/davasorus/engram/internal/core"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/davasorus/engram/internal/core"
 )
 
 type ms struct{ n map[string]core.Note }

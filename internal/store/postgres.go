@@ -7,14 +7,16 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/davasorus/engram/internal/core"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
+
+	"github.com/davasorus/engram/internal/core"
 )
 
 type Postgres struct {
@@ -100,7 +102,8 @@ func (p *Postgres) Upsert(ctx context.Context, n core.Note) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	// Rollback after a successful Commit returns ErrTxClosed; safe to discard.
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	var emb any
 	if len(n.Vector) > 0 {
@@ -138,7 +141,7 @@ ON CONFLICT (id) DO UPDATE SET
 
 func (p *Postgres) Get(ctx context.Context, id string) (*core.Note, error) {
 	n, err := p.scanOne(ctx, `SELECT id,title,body,frontmatter,tags,content_hash,created,updated FROM notes WHERE id=$1`, id)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

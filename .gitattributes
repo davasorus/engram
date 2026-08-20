@@ -1,0 +1,13 @@
+# Normalize line endings: everything text is LF in the repo and on checkout.
+# Prevents CRLF churn from Windows-side editing (gofmt/goimports treat CRLF
+# as "not properly formatted").
+* text=auto eol=lf
+
+# Vendored/minified assets: keep as-is.
+internal/web/static/alpine.min.js -text
+
+# Binary-ish things git shouldn't touch.
+*.png binary
+*.ico binary
+
+*.bak

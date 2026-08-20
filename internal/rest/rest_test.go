@@ -75,7 +75,9 @@ func TestHealth(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	var body map[string]any
-	json.Unmarshal(rec.Body.Bytes(), &body)
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal health body: %v", err)
+	}
 	if body["status"] != "ok" {
 		t.Fatalf("health body: %v", body)
 	}
@@ -92,7 +94,9 @@ func TestWriteThenGet(t *testing.T) {
 		t.Fatalf("write status %d: %s", rec.Code, rec.Body.String())
 	}
 	var n core.Note
-	json.Unmarshal(rec.Body.Bytes(), &n)
+	if err := json.Unmarshal(rec.Body.Bytes(), &n); err != nil {
+		t.Fatalf("unmarshal write response: %v", err)
+	}
 	if n.ID != "hello" {
 		t.Fatalf("id: %q", n.ID)
 	}
@@ -103,7 +107,9 @@ func TestWriteThenGet(t *testing.T) {
 		t.Fatalf("get status %d", rec.Code)
 	}
 	var got core.Note
-	json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal get response: %v", err)
+	}
 	if got.Title != "Hello" {
 		t.Fatalf("get title: %q", got.Title)
 	}
@@ -139,7 +145,9 @@ func TestSearchEndpoint(t *testing.T) {
 		t.Fatalf("search status %d", rec.Code)
 	}
 	var hits []core.SearchHit
-	json.Unmarshal(rec.Body.Bytes(), &hits)
+	if err := json.Unmarshal(rec.Body.Bytes(), &hits); err != nil {
+		t.Fatalf("unmarshal search hits: %v", err)
+	}
 	if len(hits) != 1 {
 		t.Fatalf("expected 1 hit, got %d", len(hits))
 	}

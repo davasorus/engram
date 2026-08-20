@@ -12,13 +12,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/davasorus/engram/internal/core"
 	"github.com/davasorus/engram/internal/embed"
 	emcp "github.com/davasorus/engram/internal/mcp"
 	"github.com/davasorus/engram/internal/rest"
 	"github.com/davasorus/engram/internal/store"
 	"github.com/davasorus/engram/internal/web"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // version info, stamped by GoReleaser via -ldflags at release build time.
@@ -60,7 +61,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	emb := embed.New(*embedURL, *embedModel)
 	eng := core.NewEngine(st, emb)
@@ -118,7 +119,7 @@ func runHealthcheck(addr string) int {
 	if err != nil {
 		return 1
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return 1
 	}
