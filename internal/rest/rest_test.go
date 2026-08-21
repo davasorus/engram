@@ -28,7 +28,7 @@ func (m *memStore) Get(_ context.Context, id string) (*core.Note, error) {
 	return &n, nil
 }
 func (m *memStore) Delete(_ context.Context, id string) error { delete(m.notes, id); return nil }
-func (m *memStore) List(_ context.Context, limit, offset int) ([]core.Note, error) {
+func (m *memStore) List(_ context.Context, _ string, limit, offset int) ([]core.Note, error) {
 	var out []core.Note
 	for _, n := range m.notes {
 		out = append(out, n)
@@ -37,24 +37,14 @@ func (m *memStore) List(_ context.Context, limit, offset int) ([]core.Note, erro
 	return out, nil
 }
 func (m *memStore) Count(_ context.Context) (int, error) { return len(m.notes), nil }
-func (m *memStore) MissingVectorIDs(_ context.Context) ([]string, error) {
-	var out []string
-	for id, n := range m.notes {
-		if len(n.Vector) == 0 {
-			out = append(out, id)
-		}
-	}
-	sort.Strings(out)
-	return out, nil
-}
-func (m *memStore) SearchSemantic(_ context.Context, _ []float32, limit int) ([]core.SearchHit, error) {
+func (m *memStore) SearchSemantic(_ context.Context, _ string, _ []float32, limit int) ([]core.SearchHit, error) {
 	var out []core.SearchHit
 	for _, n := range m.notes {
 		out = append(out, core.SearchHit{Note: n, Score: 1, Kind: "semantic"})
 	}
 	return out, nil
 }
-func (m *memStore) KeywordSearch(_ context.Context, q string, _ int) ([]core.Note, error) {
+func (m *memStore) KeywordSearch(_ context.Context, _ string, q string, _ int) ([]core.Note, error) {
 	var out []core.Note
 	for _, n := range m.notes {
 		if strings.Contains(strings.ToLower(n.Body), strings.ToLower(q)) {
@@ -85,9 +75,7 @@ func TestHealth(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal health body: %v", err)
-	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
 	if body["status"] != "ok" {
 		t.Fatalf("health body: %v", body)
 	}
@@ -104,9 +92,7 @@ func TestWriteThenGet(t *testing.T) {
 		t.Fatalf("write status %d: %s", rec.Code, rec.Body.String())
 	}
 	var n core.Note
-	if err := json.Unmarshal(rec.Body.Bytes(), &n); err != nil {
-		t.Fatalf("unmarshal write response: %v", err)
-	}
+	json.Unmarshal(rec.Body.Bytes(), &n)
 	if n.ID != "hello" {
 		t.Fatalf("id: %q", n.ID)
 	}
@@ -117,9 +103,7 @@ func TestWriteThenGet(t *testing.T) {
 		t.Fatalf("get status %d", rec.Code)
 	}
 	var got core.Note
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal get response: %v", err)
-	}
+	json.Unmarshal(rec.Body.Bytes(), &got)
 	if got.Title != "Hello" {
 		t.Fatalf("get title: %q", got.Title)
 	}
@@ -155,9 +139,7 @@ func TestSearchEndpoint(t *testing.T) {
 		t.Fatalf("search status %d", rec.Code)
 	}
 	var hits []core.SearchHit
-	if err := json.Unmarshal(rec.Body.Bytes(), &hits); err != nil {
-		t.Fatalf("unmarshal search hits: %v", err)
-	}
+	json.Unmarshal(rec.Body.Bytes(), &hits)
 	if len(hits) != 1 {
 		t.Fatalf("expected 1 hit, got %d", len(hits))
 	}

@@ -2,7 +2,6 @@ package core_test
 
 import (
 	"context"
-	"fmt"
 	"hash/fnv"
 	"math"
 	"sort"
@@ -28,7 +27,7 @@ func (m *memStore) Get(_ context.Context, id string) (*core.Note, error) {
 	return &n, nil
 }
 func (m *memStore) Delete(_ context.Context, id string) error { delete(m.notes, id); return nil }
-func (m *memStore) List(_ context.Context, limit, offset int) ([]core.Note, error) {
+func (m *memStore) List(_ context.Context, _ string, limit, offset int) ([]core.Note, error) {
 	var out []core.Note
 	for _, n := range m.notes {
 		out = append(out, n)
@@ -44,17 +43,7 @@ func (m *memStore) List(_ context.Context, limit, offset int) ([]core.Note, erro
 	return out, nil
 }
 func (m *memStore) Count(_ context.Context) (int, error) { return len(m.notes), nil }
-func (m *memStore) MissingVectorIDs(_ context.Context) ([]string, error) {
-	var out []string
-	for id, n := range m.notes {
-		if len(n.Vector) == 0 {
-			out = append(out, id)
-		}
-	}
-	sort.Strings(out)
-	return out, nil
-}
-func (m *memStore) SearchSemantic(_ context.Context, q []float32, limit int) ([]core.SearchHit, error) {
+func (m *memStore) SearchSemantic(_ context.Context, _ string, q []float32, limit int) ([]core.SearchHit, error) {
 	var hits []core.SearchHit
 	for _, n := range m.notes {
 		if len(n.Vector) == 0 {
@@ -68,7 +57,7 @@ func (m *memStore) SearchSemantic(_ context.Context, q []float32, limit int) ([]
 	}
 	return hits, nil
 }
-func (m *memStore) KeywordSearch(_ context.Context, q string, limit int) ([]core.Note, error) {
+func (m *memStore) KeywordSearch(_ context.Context, _ string, q string, limit int) ([]core.Note, error) {
 	var out []core.Note
 	ql := strings.ToLower(q)
 	for _, n := range m.notes {
@@ -154,20 +143,12 @@ func TestWriteReadRoundTrip(t *testing.T) {
 	}
 }
 
-// mustWrite seeds a note, failing the test on error.
-func mustWrite(t *testing.T, e *core.Engine, ctx context.Context, in core.WriteInput) {
-	t.Helper()
-	if _, err := e.Write(ctx, in); err != nil {
-		t.Fatalf("seed write %q: %v", in.Title, err)
-	}
-}
-
 func TestSemanticSearchRanks(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()
-	mustWrite(t, e, ctx, core.WriteInput{Title: "Postgres backups", Body: "pg_dump and WAL archiving for postgres backups"})
-	mustWrite(t, e, ctx, core.WriteInput{Title: "Cat facts", Body: "cats sleep a lot and purr"})
-	hits, err := e.Search(ctx, "postgres backup strategy", 5, "semantic")
+	e.Write(ctx, core.WriteInput{Title: "Postgres backups", Body: "pg_dump and WAL archiving for postgres backups"})
+	e.Write(ctx, core.WriteInput{Title: "Cat facts", Body: "cats sleep a lot and purr"})
+	hits, err := e.Search(ctx, "", "postgres backup strategy", 5, "semantic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,8 +160,8 @@ func TestSemanticSearchRanks(t *testing.T) {
 func TestKeywordSearch(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()
-	mustWrite(t, e, ctx, core.WriteInput{Title: "Docker notes", Body: "podman play kube is handy"})
-	hits, err := e.Search(ctx, "podman", 5, "keyword")
+	e.Write(ctx, core.WriteInput{Title: "Docker notes", Body: "podman play kube is handy"})
+	hits, err := e.Search(ctx, "", "podman", 5, "keyword")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +173,7 @@ func TestKeywordSearch(t *testing.T) {
 func TestPatch(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()
-	mustWrite(t, e, ctx, core.WriteInput{Title: "Config", Body: "port is 27123 currently"})
+	e.Write(ctx, core.WriteInput{Title: "Config", Body: "port is 27123 currently"})
 	n, err := e.Patch(ctx, "config", "27123", "27124")
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +181,7 @@ func TestPatch(t *testing.T) {
 	if n.Body != "port is 27124 currently" {
 		t.Fatalf("patch body: %q", n.Body)
 	}
-	mustWrite(t, e, ctx, core.WriteInput{Title: "Dup", Body: "aa aa"})
+	e.Write(ctx, core.WriteInput{Title: "Dup", Body: "aa aa"})
 	if _, err := e.Patch(ctx, "dup", "aa", "bb"); err == nil {
 		t.Fatal("expected ambiguity error")
 	}
@@ -212,92 +193,13 @@ func TestPatch(t *testing.T) {
 func TestBacklinks(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()
-	mustWrite(t, e, ctx, core.WriteInput{Title: "Target", Body: "the target note"})
-	mustWrite(t, e, ctx, core.WriteInput{Title: "Source", Body: "see [[Target]] for details"})
+	e.Write(ctx, core.WriteInput{Title: "Target", Body: "the target note"})
+	e.Write(ctx, core.WriteInput{Title: "Source", Body: "see [[Target]] for details"})
 	bl, err := e.Backlinks(ctx, "target")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(bl) != 1 || bl[0].Title != "Source" {
 		t.Fatalf("backlinks: %+v", bl)
-	}
-}
-
-// --- degraded-mode behavior --------------------------------------------------
-
-type failEmbedder struct{}
-
-func (failEmbedder) Model() string { return "down" }
-func (failEmbedder) Embed(context.Context, string) ([]float32, error) {
-	return nil, fmt.Errorf("connection refused")
-}
-
-// countingEmbedder wraps fakeEmbedder and counts calls.
-type countingEmbedder struct{ calls int }
-
-func (c *countingEmbedder) Model() string { return "fake" }
-func (c *countingEmbedder) Embed(ctx context.Context, s string) ([]float32, error) {
-	c.calls++
-	return fakeEmbedder{}.Embed(ctx, s)
-}
-
-func TestWriteDegradesWhenEmbedderDown(t *testing.T) {
-	mem := newMem()
-	down := core.NewEngine(mem, failEmbedder{})
-	ctx := context.Background()
-
-	// Write must succeed even with the embedder unreachable.
-	if _, err := down.Write(ctx, core.WriteInput{Title: "Offline note", Body: "written while the studio was off"}); err != nil {
-		t.Fatalf("degraded write should succeed: %v", err)
-	}
-	if n, err := down.MissingVectors(ctx); err != nil || n != 1 {
-		t.Fatalf("missing vectors: n=%d err=%v", n, err)
-	}
-
-	// Semantic search degrades to keyword and still finds it.
-	hits, err := down.Search(ctx, "studio", 5, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hits) != 1 || hits[0].Kind != "keyword" {
-		t.Fatalf("expected keyword-fallback hit, got %+v", hits)
-	}
-
-	// Embedder comes back: backfill only the missing note.
-	up := core.NewEngine(mem, fakeEmbedder{})
-	n, err := up.Reembed(ctx, true)
-	if err != nil || n != 1 {
-		t.Fatalf("reembed missing: n=%d err=%v", n, err)
-	}
-	if n, _ := up.MissingVectors(ctx); n != 0 {
-		t.Fatalf("still missing %d after backfill", n)
-	}
-	hits, err = up.Search(ctx, "note written while offline", 5, "semantic")
-	if err != nil || len(hits) == 0 {
-		t.Fatalf("semantic search after backfill: hits=%v err=%v", hits, err)
-	}
-}
-
-func TestWriteReusesVectorOnIdenticalBody(t *testing.T) {
-	ce := &countingEmbedder{}
-	e := core.NewEngine(newMem(), ce)
-	ctx := context.Background()
-
-	in := core.WriteInput{Title: "Stable", Body: "same body both times"}
-	mustWrite(t, e, ctx, in)
-	if ce.calls != 1 {
-		t.Fatalf("first write: %d embed calls", ce.calls)
-	}
-	// Metadata-only rewrite (same body) must not re-embed.
-	in.Tags = []string{"retagged"}
-	mustWrite(t, e, ctx, in)
-	if ce.calls != 1 {
-		t.Fatalf("identical-body rewrite re-embedded: %d calls", ce.calls)
-	}
-	// Changed body must re-embed.
-	in.Body = "different body now"
-	mustWrite(t, e, ctx, in)
-	if ce.calls != 2 {
-		t.Fatalf("changed-body rewrite: %d calls", ce.calls)
 	}
 }

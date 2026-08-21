@@ -14,6 +14,7 @@ import (
 // everything else (links, vector, hash) is derived from it on write.
 type Note struct {
 	ID          string         `json:"id"`
+	Project     string         `json:"project,omitempty"` // scope: which project this memory belongs to
 	Title       string         `json:"title"`
 	Body        string         `json:"body"` // markdown text
 	Frontmatter map[string]any `json:"frontmatter,omitempty"`
@@ -56,23 +57,22 @@ type Store interface {
 	// Delete removes a note by ID. Missing is not an error.
 	Delete(ctx context.Context, id string) error
 
-	// List returns notes ordered by Updated desc, paginated.
-	List(ctx context.Context, limit, offset int) ([]Note, error)
+	// List returns notes ordered by Updated desc, paginated. If project is
+	// non-empty, only notes in that project are returned.
+	List(ctx context.Context, project string, limit, offset int) ([]Note, error)
 
 	// Count returns the total number of notes.
 	Count(ctx context.Context) (int, error)
 
-	// MissingVectorIDs returns IDs of notes with no stored embedding
-	// (created by degraded writes while the embedder was unreachable).
-	MissingVectorIDs(ctx context.Context) ([]string, error)
-
 	// SearchSemantic runs vector KNN in the database and returns ranked hits.
 	// The backend does the ranking (e.g. pgvector HNSW), so this scales
-	// without pulling all vectors into the app.
-	SearchSemantic(ctx context.Context, query []float32, limit int) ([]SearchHit, error)
+	// without pulling all vectors into the app. If project is non-empty,
+	// results are restricted to that project.
+	SearchSemantic(ctx context.Context, project string, query []float32, limit int) ([]SearchHit, error)
 
-	// KeywordSearch does a full-text/substring match over title+body.
-	KeywordSearch(ctx context.Context, q string, limit int) ([]Note, error)
+	// KeywordSearch does a full-text/substring match over title+body. If
+	// project is non-empty, results are restricted to that project.
+	KeywordSearch(ctx context.Context, project, q string, limit int) ([]Note, error)
 
 	// Backlinks returns notes whose Links contain the given id/title.
 	Backlinks(ctx context.Context, idOrTitle string) ([]Backlink, error)

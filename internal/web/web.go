@@ -77,7 +77,7 @@ func (s *Server) Routes() *http.ServeMux {
 }
 
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
-	notes, err := s.eng.List(r.Context(), 100, 0)
+	notes, err := s.eng.List(r.Context(), "", 100, 0)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -107,7 +107,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	var hits []core.SearchHit
 	if q != "" {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		hits, _ = s.eng.Search(r.Context(), q, limit, kind)
+		hits, _ = s.eng.Search(r.Context(), "", q, limit, kind)
 	}
 	vms := toVMs(hits)
 	s.render(w, "search.html", map[string]any{"Query": q, "Kind": kind, "Results": vms, "Count": len(vms)})
@@ -125,7 +125,7 @@ func (s *Server) searchFragment(w http.ResponseWriter, r *http.Request) {
 		if mode == "dropdown" {
 			limit = 6
 		}
-		hits, _ = s.eng.Search(r.Context(), q, limit, kind)
+		hits, _ = s.eng.Search(r.Context(), "", q, limit, kind)
 	}
 	vms := toVMs(hits)
 	data := map[string]any{"Query": q, "Kind": kind, "Results": vms, "Count": len(vms)}

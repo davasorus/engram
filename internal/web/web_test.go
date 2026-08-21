@@ -18,16 +18,17 @@ func (m *ms) Get(_ context.Context, id string) (*core.Note, error) {
 	}
 	return nil, nil
 }
-func (m *ms) Delete(context.Context, string) error                { return nil }
-func (m *ms) List(context.Context, int, int) ([]core.Note, error) { return nil, nil }
-func (m *ms) Count(context.Context) (int, error)                  { return 0, nil }
-func (m *ms) MissingVectorIDs(context.Context) ([]string, error)  { return nil, nil }
-func (m *ms) SearchSemantic(context.Context, []float32, int) ([]core.SearchHit, error) {
+func (m *ms) Delete(context.Context, string) error                        { return nil }
+func (m *ms) List(context.Context, string, int, int) ([]core.Note, error) { return nil, nil }
+func (m *ms) Count(context.Context) (int, error)                          { return 0, nil }
+func (m *ms) SearchSemantic(context.Context, string, []float32, int) ([]core.SearchHit, error) {
 	return nil, nil
 }
-func (m *ms) KeywordSearch(context.Context, string, int) ([]core.Note, error) { return nil, nil }
-func (m *ms) Backlinks(context.Context, string) ([]core.Backlink, error)      { return nil, nil }
-func (m *ms) Close() error                                                    { return nil }
+func (m *ms) KeywordSearch(context.Context, string, string, int) ([]core.Note, error) {
+	return nil, nil
+}
+func (m *ms) Backlinks(context.Context, string) ([]core.Backlink, error) { return nil, nil }
+func (m *ms) Close() error                                               { return nil }
 
 type fe struct{}
 

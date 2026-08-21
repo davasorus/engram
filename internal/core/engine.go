@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -31,6 +30,7 @@ var (
 // links, hash, and vector.
 type WriteInput struct {
 	ID          string         // optional; derived from title if empty
+	Project     string         // optional scope; prefixes the derived ID
 	Title       string         // required
 	Body        string         // markdown
 	Frontmatter map[string]any // optional
@@ -46,6 +46,11 @@ func (e *Engine) Write(ctx context.Context, in WriteInput) (*Note, error) {
 	id := in.ID
 	if id == "" {
 		id = slug(in.Title)
+		// Namespace the ID by project so the same title in different projects
+		// doesn't collide (e.g. "engram/code-conventions").
+		if in.Project != "" {
+			id = in.Project + "/" + id
+		}
 	}
 	hash := hashBody(in.Body)
 
@@ -55,19 +60,17 @@ func (e *Engine) Write(ctx context.Context, in WriteInput) (*Note, error) {
 	existing, _ := e.store.Get(ctx, id)
 	if existing != nil && existing.ContentHash == hash && len(existing.Vector) > 0 {
 		vector = existing.Vector
-	} else if v, err := e.embedder.Embed(ctx, embedText(in.Title, in.Body)); err == nil {
-		vector = v
 	} else {
-		// Degraded write: the embedder is unreachable (e.g. LM Studio is
-		// down). Store the note without a vector — it stays keyword-
-		// searchable — and let a reembed backfill it later. /api/health
-		// reports missing_vectors; POST /api/reembed fixes them.
-		log.Printf("engram: embed failed for %q, storing without vector: %v", id, err)
-		vector = nil
+		v, err := e.embedder.Embed(ctx, embedText(in.Title, in.Body))
+		if err != nil {
+			return nil, fmt.Errorf("embed: %w", err)
+		}
+		vector = v
 	}
 
 	n := Note{
 		ID:          id,
+		Project:     in.Project,
 		Title:       in.Title,
 		Body:        in.Body,
 		Frontmatter: in.Frontmatter,
@@ -121,8 +124,8 @@ func (e *Engine) Delete(ctx context.Context, id string) error {
 	return e.store.Delete(ctx, id)
 }
 
-func (e *Engine) List(ctx context.Context, limit, offset int) ([]Note, error) {
-	return e.store.List(ctx, limit, offset)
+func (e *Engine) List(ctx context.Context, project string, limit, offset int) ([]Note, error) {
+	return e.store.List(ctx, project, limit, offset)
 }
 
 func (e *Engine) Count(ctx context.Context) (int, error) {
@@ -134,25 +137,26 @@ func (e *Engine) Backlinks(ctx context.Context, idOrTitle string) ([]Backlink, e
 }
 
 // Search runs semantic search by default; when semantic is unavailable (no
-// vectors yet) or kind=="keyword", it falls back to keyword matching.
-func (e *Engine) Search(ctx context.Context, query string, limit int, kind string) ([]SearchHit, error) {
+// vectors yet) or kind=="keyword", it falls back to keyword matching. If
+// project is non-empty, results are scoped to that project.
+func (e *Engine) Search(ctx context.Context, project, query string, limit int, kind string) ([]SearchHit, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 	if kind == "keyword" {
-		return e.keyword(ctx, query, limit)
+		return e.keyword(ctx, project, query, limit)
 	}
 	// semantic
 	qv, err := e.embedder.Embed(ctx, query)
 	if err != nil {
 		// Embedding unavailable (e.g. LM Studio down): degrade to keyword.
-		return e.keyword(ctx, query, limit)
+		return e.keyword(ctx, project, query, limit)
 	}
-	return e.store.SearchSemantic(ctx, qv, limit)
+	return e.store.SearchSemantic(ctx, project, qv, limit)
 }
 
-func (e *Engine) keyword(ctx context.Context, query string, limit int) ([]SearchHit, error) {
-	notes, err := e.store.KeywordSearch(ctx, query, limit)
+func (e *Engine) keyword(ctx context.Context, project, query string, limit int) ([]SearchHit, error) {
+	notes, err := e.store.KeywordSearch(ctx, project, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -163,36 +167,13 @@ func (e *Engine) keyword(ctx context.Context, query string, limit int) ([]Search
 	return hits, nil
 }
 
-// Reembed rebuilds vectors. With onlyMissing it backfills just the notes
-// that have no vector (from degraded writes while the embedder was down);
-// otherwise it re-embeds every note (e.g. after an embedding-model change).
-// Returns the number re-embedded.
-func (e *Engine) Reembed(ctx context.Context, onlyMissing bool) (int, error) {
-	if onlyMissing {
-		ids, err := e.store.MissingVectorIDs(ctx)
-		if err != nil {
-			return 0, err
-		}
-		var n int
-		for _, id := range ids {
-			note, err := e.store.Get(ctx, id)
-			if err != nil {
-				return n, err
-			}
-			if note == nil {
-				continue
-			}
-			if err := e.reembedOne(ctx, *note); err != nil {
-				return n, err
-			}
-			n++
-		}
-		return n, nil
-	}
+// Reembed rebuilds vectors for every note (e.g. after an embedding-model
+// change). Returns the number re-embedded.
+func (e *Engine) Reembed(ctx context.Context) (int, error) {
 	var n int
 	offset := 0
 	for {
-		batch, err := e.store.List(ctx, 100, offset)
+		batch, err := e.store.List(ctx, "", 100, offset)
 		if err != nil {
 			return n, err
 		}
@@ -200,7 +181,14 @@ func (e *Engine) Reembed(ctx context.Context, onlyMissing bool) (int, error) {
 			break
 		}
 		for _, note := range batch {
-			if err := e.reembedOne(ctx, note); err != nil {
+			v, err := e.embedder.Embed(ctx, embedText(note.Title, note.Body))
+			if err != nil {
+				return n, fmt.Errorf("reembed %q: %w", note.ID, err)
+			}
+			note.Vector = v
+			note.Links = parseLinks(note.Body)
+			note.ContentHash = hashBody(note.Body)
+			if err := e.store.Upsert(ctx, note); err != nil {
 				return n, err
 			}
 			n++
@@ -208,30 +196,6 @@ func (e *Engine) Reembed(ctx context.Context, onlyMissing bool) (int, error) {
 		offset += len(batch)
 	}
 	return n, nil
-}
-
-func (e *Engine) reembedOne(ctx context.Context, note Note) error {
-	v, err := e.embedder.Embed(ctx, embedText(note.Title, note.Body))
-	if err != nil {
-		return fmt.Errorf("reembed %q: %w", note.ID, err)
-	}
-	note.Vector = v
-	note.Links = parseLinks(note.Body)
-	note.ContentHash = hashBody(note.Body)
-	return e.store.Upsert(ctx, note)
-}
-
-// MissingVectors reports how many notes have no embedding (degraded writes
-// awaiting backfill).
-func (e *Engine) MissingVectors(ctx context.Context) (int, error) {
-	ids, err := e.store.MissingVectorIDs(ctx)
-	return len(ids), err
-}
-
-// ProbeEmbedder checks whether the embedding endpoint is reachable.
-func (e *Engine) ProbeEmbedder(ctx context.Context) error {
-	_, err := e.embedder.Embed(ctx, "health probe")
-	return err
 }
 
 // --- helpers ----------------------------------------------------------------

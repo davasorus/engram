@@ -7,16 +7,14 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/davasorus/engram/internal/core"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
-
-	"github.com/davasorus/engram/internal/core"
 )
 
 type Postgres struct {
@@ -50,6 +48,7 @@ func (p *Postgres) migrate(ctx context.Context) error {
 		`CREATE EXTENSION IF NOT EXISTS vector`,
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS notes (
   id            TEXT PRIMARY KEY,
+  project       TEXT NOT NULL DEFAULT '',
   title         TEXT NOT NULL,
   body          TEXT NOT NULL,
   frontmatter   JSONB NOT NULL DEFAULT '{}',
@@ -59,6 +58,8 @@ func (p *Postgres) migrate(ctx context.Context) error {
   created       TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated       TIMESTAMPTZ NOT NULL DEFAULT now()
 )`, p.dims),
+		// Add project column if upgrading an older table that predates it.
+		`ALTER TABLE notes ADD COLUMN IF NOT EXISTS project TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS links (
   src TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
   dst TEXT NOT NULL,
@@ -66,6 +67,7 @@ func (p *Postgres) migrate(ctx context.Context) error {
 )`,
 		`CREATE INDEX IF NOT EXISTS idx_links_dst ON links(dst)`,
 		`CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_notes_project ON notes(project)`,
 		// HNSW index for cosine distance. Built lazily; fine to exist before rows.
 		`CREATE INDEX IF NOT EXISTS idx_notes_embedding ON notes USING hnsw (embedding vector_cosine_ops)`,
 		// Full-text search index for keyword fallback.
@@ -102,21 +104,20 @@ func (p *Postgres) Upsert(ctx context.Context, n core.Note) error {
 	if err != nil {
 		return err
 	}
-	// Rollback after a successful Commit returns ErrTxClosed; safe to discard.
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer tx.Rollback(ctx)
 
 	var emb any
 	if len(n.Vector) > 0 {
 		emb = pgvector.NewVector(n.Vector)
 	}
 	_, err = tx.Exec(ctx, `
-INSERT INTO notes (id,title,body,frontmatter,tags,content_hash,embedding,created,updated)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+INSERT INTO notes (id,project,title,body,frontmatter,tags,content_hash,embedding,created,updated)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 ON CONFLICT (id) DO UPDATE SET
-  title=EXCLUDED.title, body=EXCLUDED.body, frontmatter=EXCLUDED.frontmatter,
+  project=EXCLUDED.project, title=EXCLUDED.title, body=EXCLUDED.body, frontmatter=EXCLUDED.frontmatter,
   tags=EXCLUDED.tags, content_hash=EXCLUDED.content_hash, embedding=EXCLUDED.embedding,
   updated=EXCLUDED.updated`,
-		n.ID, n.Title, n.Body, string(fm), string(tags), n.ContentHash, emb,
+		n.ID, n.Project, n.Title, n.Body, string(fm), string(tags), n.ContentHash, emb,
 		n.Created, n.Updated)
 	if err != nil {
 		return err
@@ -140,8 +141,8 @@ ON CONFLICT (id) DO UPDATE SET
 }
 
 func (p *Postgres) Get(ctx context.Context, id string) (*core.Note, error) {
-	n, err := p.scanOne(ctx, `SELECT `+noteColumns+` FROM notes WHERE id=$1`, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	n, err := p.scanOne(ctx, `SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated FROM notes WHERE id=$1`, id)
+	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
@@ -151,26 +152,17 @@ func (p *Postgres) Get(ctx context.Context, id string) (*core.Note, error) {
 	return n, nil
 }
 
-// noteColumns is the exact column list scanOne/scanMany decode — every query
-// feeding them MUST use it, in this order. (A query with a different column
-// count fails at runtime with "field descriptions must equal destinations".)
-const noteColumns = "id,title,body,frontmatter,tags,content_hash,created,updated,embedding"
-
 func (p *Postgres) scanOne(ctx context.Context, q string, args ...any) (*core.Note, error) {
 	row := p.pool.QueryRow(ctx, q, args...)
 	var (
 		n        core.Note
 		fm, tags []byte
-		vec      *pgvector.Vector // nullable: degraded writes have no vector
 	)
-	if err := row.Scan(&n.ID, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated, &vec); err != nil {
+	if err := row.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal(fm, &n.Frontmatter)
 	_ = json.Unmarshal(tags, &n.Tags)
-	if vec != nil {
-		n.Vector = vec.Slice()
-	}
 	return &n, nil
 }
 
@@ -196,11 +188,17 @@ func (p *Postgres) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-func (p *Postgres) List(ctx context.Context, limit, offset int) ([]core.Note, error) {
+func (p *Postgres) List(ctx context.Context, project string, limit, offset int) ([]core.Note, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := p.pool.Query(ctx, `SELECT `+noteColumns+` FROM notes ORDER BY updated DESC LIMIT $1 OFFSET $2`, limit, offset)
+	var err error
+	var rows pgx.Rows
+	if project != "" {
+		rows, err = p.pool.Query(ctx, `SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated FROM notes WHERE project=$1 ORDER BY updated DESC LIMIT $2 OFFSET $3`, project, limit, offset)
+	} else {
+		rows, err = p.pool.Query(ctx, `SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated FROM notes ORDER BY updated DESC LIMIT $1 OFFSET $2`, limit, offset)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -214,16 +212,12 @@ func (p *Postgres) scanMany(rows pgx.Rows) ([]core.Note, error) {
 		var (
 			n        core.Note
 			fm, tags []byte
-			vec      *pgvector.Vector
 		)
-		if err := rows.Scan(&n.ID, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated, &vec); err != nil {
+		if err := rows.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(fm, &n.Frontmatter)
 		_ = json.Unmarshal(tags, &n.Tags)
-		if vec != nil {
-			n.Vector = vec.Slice()
-		}
 		out = append(out, n)
 	}
 	return out, rows.Err()
@@ -235,36 +229,31 @@ func (p *Postgres) Count(ctx context.Context) (int, error) {
 	return n, err
 }
 
-func (p *Postgres) MissingVectorIDs(ctx context.Context) ([]string, error) {
-	rows, err := p.pool.Query(ctx, `SELECT id FROM notes WHERE embedding IS NULL ORDER BY updated ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
-}
-
 // SearchSemantic runs pgvector KNN directly in SQL — the DB does the ranking,
 // so this scales with the HNSW index instead of pulling all vectors into Go.
-func (p *Postgres) SearchSemantic(ctx context.Context, query []float32, limit int) ([]core.SearchHit, error) {
+func (p *Postgres) SearchSemantic(ctx context.Context, project string, query []float32, limit int) ([]core.SearchHit, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	rows, err := p.pool.Query(ctx, `
-SELECT id,title,body,frontmatter,tags,content_hash,created,updated,
+	var rows pgx.Rows
+	var err error
+	if project != "" {
+		rows, err = p.pool.Query(ctx, `
+SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated,
+       1 - (embedding <=> $1) AS score
+FROM notes
+WHERE embedding IS NOT NULL AND project=$3
+ORDER BY embedding <=> $1
+LIMIT $2`, pgvector.NewVector(query), limit, project)
+	} else {
+		rows, err = p.pool.Query(ctx, `
+SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated,
        1 - (embedding <=> $1) AS score
 FROM notes
 WHERE embedding IS NOT NULL
 ORDER BY embedding <=> $1
 LIMIT $2`, pgvector.NewVector(query), limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +265,7 @@ LIMIT $2`, pgvector.NewVector(query), limit)
 			fm, tags []byte
 			score    float64
 		)
-		if err := rows.Scan(&n.ID, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated, &score); err != nil {
+		if err := rows.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated, &score); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(fm, &n.Frontmatter)
@@ -286,15 +275,29 @@ LIMIT $2`, pgvector.NewVector(query), limit)
 	return hits, rows.Err()
 }
 
-func (p *Postgres) KeywordSearch(ctx context.Context, q string, limit int) ([]core.Note, error) {
+func (p *Postgres) KeywordSearch(ctx context.Context, project, q string, limit int) ([]core.Note, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := p.pool.Query(ctx, `SELECT `+noteColumns+` FROM notes
+	var rows pgx.Rows
+	var err error
+	if project != "" {
+		rows, err = p.pool.Query(ctx, `
+SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated
+FROM notes
+WHERE (to_tsvector('english', title || ' ' || body) @@ plainto_tsquery('english', $1)
+   OR lower(title) LIKE '%' || lower($1) || '%') AND project=$3
+ORDER BY updated DESC
+LIMIT $2`, q, limit, project)
+	} else {
+		rows, err = p.pool.Query(ctx, `
+SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated
+FROM notes
 WHERE to_tsvector('english', title || ' ' || body) @@ plainto_tsquery('english', $1)
    OR lower(title) LIKE '%' || lower($1) || '%'
 ORDER BY updated DESC
 LIMIT $2`, q, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
