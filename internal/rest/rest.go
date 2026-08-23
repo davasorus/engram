@@ -33,32 +33,13 @@ func (a *API) Routes() *http.ServeMux {
 	return mux
 }
 
-// health reports service status. Always 200 when the store is reachable —
-// a down embedder is degraded operation, not an unhealthy service (writes
-// land without vectors; searches fall back to keyword). missing_vectors > 0
-// means degraded writes are awaiting a POST /api/reembed. Add ?probe=1 to
-// also test the embedding endpoint (costs one embed call; keep it out of
-// the container HEALTHCHECK so engram's health never depends on LM Studio).
 func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	n, err := a.eng.Count(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	missing, err := a.eng.MissingVectors(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	resp := map[string]any{"status": "ok", "notes": n, "missing_vectors": missing}
-	if r.URL.Query().Get("probe") != "" {
-		if err := a.eng.ProbeEmbedder(r.Context()); err != nil {
-			resp["embedder"] = "unreachable: " + err.Error()
-		} else {
-			resp["embedder"] = "ok"
-		}
-	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "notes": n})
 }
 
 func (a *API) search(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +50,8 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	kind := r.URL.Query().Get("kind")
-	hits, err := a.eng.Search(r.Context(), q, limit, kind)
+	project := r.URL.Query().Get("project")
+	hits, err := a.eng.Search(r.Context(), project, q, limit, kind)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -80,7 +62,8 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 func (a *API) list(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	ns, err := a.eng.List(r.Context(), limit, offset)
+	project := r.URL.Query().Get("project")
+	ns, err := a.eng.List(r.Context(), project, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -89,10 +72,11 @@ func (a *API) list(w http.ResponseWriter, r *http.Request) {
 }
 
 type writeBody struct {
-	ID    string   `json:"id"`
-	Title string   `json:"title"`
-	Body  string   `json:"body"`
-	Tags  []string `json:"tags"`
+	ID      string   `json:"id"`
+	Project string   `json:"project"`
+	Title   string   `json:"title"`
+	Body    string   `json:"body"`
+	Tags    []string `json:"tags"`
 }
 
 func (a *API) write(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +85,7 @@ func (a *API) write(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	n, err := a.eng.Write(r.Context(), core.WriteInput{ID: b.ID, Title: b.Title, Body: b.Body, Tags: b.Tags})
+	n, err := a.eng.Write(r.Context(), core.WriteInput{ID: b.ID, Project: b.Project, Title: b.Title, Body: b.Body, Tags: b.Tags})
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -158,11 +142,8 @@ func (a *API) links(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, bl)
 }
 
-// reembed backfills notes missing vectors (the default), or with ?all=1
-// re-embeds every note (after an embedding-model change).
 func (a *API) reembed(w http.ResponseWriter, r *http.Request) {
-	onlyMissing := r.URL.Query().Get("all") == ""
-	n, err := a.eng.Reembed(r.Context(), onlyMissing)
+	n, err := a.eng.Reembed(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

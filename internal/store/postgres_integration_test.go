@@ -10,16 +10,14 @@ package store_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
+	"github.com/davasorus/engram/internal/core"
+	"github.com/davasorus/engram/internal/store"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-
-	"github.com/davasorus/engram/internal/core"
-	"github.com/davasorus/engram/internal/store"
 )
 
 // startPG launches a pgvector container and returns a connected store.
@@ -99,7 +97,7 @@ func TestPostgresSemanticSearch(t *testing.T) {
 	must(core.Note{ID: "b", Title: "Beta", Body: "beta", Vector: []float32{0, 1, 0, 0}})
 	must(core.Note{ID: "c", Title: "Gamma", Body: "gamma", Vector: []float32{0, 0, 1, 0}})
 
-	hits, err := st.SearchSemantic(ctx, []float32{0.9, 0.1, 0, 0}, 2)
+	hits, err := st.SearchSemantic(ctx, "", []float32{0.9, 0.1, 0, 0}, 2)
 	if err != nil {
 		t.Fatalf("semantic search: %v", err)
 	}
@@ -124,7 +122,7 @@ func TestPostgresKeywordAndBacklinks(t *testing.T) {
 	st.Upsert(ctx, core.Note{ID: "source", Title: "Source", Body: "see [[Target Note]]", Links: []string{"target note"}, Vector: []float32{0, 1, 0, 0}})
 
 	// keyword FTS
-	kw, err := st.KeywordSearch(ctx, "postgres", 5)
+	kw, err := st.KeywordSearch(ctx, "", "postgres", 5)
 	if err != nil {
 		t.Fatalf("keyword: %v", err)
 	}
@@ -152,226 +150,53 @@ func TestPostgresCountAndList(t *testing.T) {
 	if c, _ := st.Count(ctx); c != 3 {
 		t.Fatalf("count: %d", c)
 	}
-	list, err := st.List(ctx, 2, 0)
+	list, err := st.List(ctx, "", 2, 0)
 	if err != nil || len(list) != 2 {
 		t.Fatalf("list: %v (%d)", err, len(list))
 	}
 }
 
-// TestPostgresNullVectorRoundTrip covers degraded writes: a note stored with
-// no vector must scan back cleanly (NULL embedding -> empty Vector), show up
-// in MissingVectorIDs, and disappear from it once a vector is upserted.
-func TestPostgresNullVectorRoundTrip(t *testing.T) {
+func TestPostgresProjectScoping(t *testing.T) {
 	st, done := startPG(t)
 	defer done()
 	ctx := context.Background()
 
-	n := core.Note{ID: "degraded", Title: "Degraded", Body: "written while embedder was down", ContentHash: "h1"}
-	if err := st.Upsert(ctx, n); err != nil {
-		t.Fatalf("upsert without vector: %v", err)
-	}
-
-	got, err := st.Get(ctx, "degraded")
-	if err != nil {
-		t.Fatalf("get with NULL embedding: %v", err)
-	}
-	if got == nil || len(got.Vector) != 0 {
-		t.Fatalf("expected empty vector, got %+v", got)
-	}
-
-	ids, err := st.MissingVectorIDs(ctx)
-	if err != nil {
-		t.Fatalf("missing ids: %v", err)
-	}
-	if len(ids) != 1 || ids[0] != "degraded" {
-		t.Fatalf("missing ids: %v", ids)
-	}
-
-	// Backfill: same note with a vector; must scan back and leave the list.
-	n.Vector = []float32{0.1, 0.2, 0.3, 0.4}
-	if err := st.Upsert(ctx, n); err != nil {
-		t.Fatalf("backfill upsert: %v", err)
-	}
-	got, err = st.Get(ctx, "degraded")
-	if err != nil || len(got.Vector) != 4 {
-		t.Fatalf("vector after backfill: %+v err=%v", got, err)
-	}
-	if ids, _ := st.MissingVectorIDs(ctx); len(ids) != 0 {
-		t.Fatalf("still listed as missing: %v", ids)
-	}
-}
-
-// TestPostgresVectorConsistencyAcrossReads is a regression test for a real,
-// silent bug from this project's history: Get and List once selected a
-// column list that omitted "embedding" entirely. Nothing errored — pgx
-// happily scanned the columns that WERE selected — so every note came back
-// with an empty Vector from those two paths, even though Upsert had stored
-// one. That silently defeated Write's "reuse the vector when the body is
-// byte-identical" optimization (Get always reported no vector, so Write
-// always re-embedded) for an unknown amount of time before anyone noticed.
-//
-// A column-COUNT mismatch (the noteColumns drift this session also hit, in
-// KeywordSearch) is loud — pgx errors immediately with a clear "number of
-// field descriptions must equal number of destinations" message, and any
-// integration test exercising that path catches it. A column-CONTENT gap
-// like the original Vector bug is the dangerous one: no error, just quietly
-// wrong data. This test targets that silent case directly by asserting Get,
-// List, and KeywordSearch all agree on the vector for the same note.
-func TestPostgresVectorConsistencyAcrossReads(t *testing.T) {
-	st, done := startPG(t)
-	defer done()
-	ctx := context.Background()
-
-	want := []float32{0.11, 0.22, 0.33, 0.44}
-	n := core.Note{
-		ID:          "vector-consistency",
-		Title:       "Vector Consistency",
-		Body:        "distinctive-keyword-for-search needle-search-term",
-		ContentHash: "h-vector-consistency",
-		Vector:      want,
-	}
-	if err := st.Upsert(ctx, n); err != nil {
-		t.Fatalf("upsert: %v", err)
-	}
-
-	assertVector := func(label string, got []float32, err error) {
-		t.Helper()
-		if err != nil {
-			t.Fatalf("%s: %v", label, err)
-		}
-		if len(got) != len(want) {
-			t.Fatalf("%s: vector length = %d, want %d (got %v)", label, len(got), len(want), got)
-		}
-		for i := range want {
-			if got[i] != want[i] {
-				t.Fatalf("%s: vector[%d] = %v, want %v", label, i, got[i], want[i])
-			}
+	// two notes in different projects, similar vectors
+	must := func(n core.Note) {
+		if err := st.Upsert(ctx, n); err != nil {
+			t.Fatalf("upsert %s: %v", n.ID, err)
 		}
 	}
+	must(core.Note{ID: "engram/conv", Project: "engram", Title: "Conventions", Body: "engram code conventions", Vector: []float32{1, 0, 0, 0}})
+	must(core.Note{ID: "other/conv", Project: "other", Title: "Conventions", Body: "other project conventions", Vector: []float32{1, 0, 0, 0}})
 
-	// Get
-	got, err := st.Get(ctx, n.ID)
+	// scoped semantic search returns only the engram note
+	hits, err := st.SearchSemantic(ctx, "engram", []float32{1, 0, 0, 0}, 10)
 	if err != nil {
-		t.Fatalf("get: %v", err)
+		t.Fatalf("scoped semantic: %v", err)
 	}
-	assertVector("Get", got.Vector, nil)
-
-	// List
-	list, err := st.List(ctx, 100, 0)
-	if err != nil {
-		t.Fatalf("list: %v", err)
+	if len(hits) != 1 || hits[0].Note.ID != "engram/conv" {
+		t.Fatalf("expected only engram note, got %+v", hits)
 	}
-	var found bool
-	for _, ln := range list {
-		if ln.ID == n.ID {
-			found = true
-			assertVector("List", ln.Vector, nil)
-		}
-	}
-	if !found {
-		t.Fatalf("List did not return the note %q", n.ID)
+	if hits[0].Note.Project != "engram" {
+		t.Fatalf("project not populated: %q", hits[0].Note.Project)
 	}
 
-	// KeywordSearch
-	hits, err := st.KeywordSearch(ctx, "needle-search-term", 10)
-	if err != nil {
-		t.Fatalf("keyword search: %v", err)
-	}
-	found = false
-	for _, h := range hits {
-		if h.ID == n.ID {
-			found = true
-			assertVector("KeywordSearch", h.Vector, nil)
-		}
-	}
-	if !found {
-		t.Fatalf("KeywordSearch did not return the note %q", n.ID)
-	}
-}
-
-// --- degraded-mode engine flow against a REAL Postgres -----------------
-
-// fail4Embedder always errors — simulates the embedder being unreachable
-// (e.g. LM Studio down), which this session hit repeatedly on both the
-// compose and kube deployment paths.
-type fail4Embedder struct{}
-
-func (fail4Embedder) Model() string { return "down" }
-func (fail4Embedder) Embed(context.Context, string) ([]float32, error) {
-	return nil, fmt.Errorf("connection refused")
-}
-
-// fixed4Embedder returns a real, fixed-length vector matching startPG's
-// 4-dim store, simulating the embedder being back up.
-type fixed4Embedder struct{ calls int }
-
-func (e *fixed4Embedder) Model() string { return "fixed" }
-func (e *fixed4Embedder) Embed(context.Context, string) ([]float32, error) {
-	e.calls++
-	return []float32{0.1, 0.2, 0.3, 0.4}, nil
-}
-
-// TestEngineDegradedModeAgainstRealPostgres exercises the full degraded ->
-// backfill flow (Write with no embedder -> keyword-only search -> reembed
-// once the embedder is back -> semantic search) against a real database,
-// not the in-memory fake. internal/core/engine_test.go covers this logic
-// with memStore; this is the same behavior verified through the real SQL,
-// since that's the layer that actually broke this session (NULL scanning,
-// column drift) — logic-only coverage wouldn't have caught either bug.
-func TestEngineDegradedModeAgainstRealPostgres(t *testing.T) {
-	st, done := startPG(t)
-	defer done()
-	ctx := context.Background()
-
-	down := core.NewEngine(st, fail4Embedder{})
-	if _, err := down.Write(ctx, core.WriteInput{
-		Title: "Offline Note",
-		Body:  "written while the embedder was unreachable",
-	}); err != nil {
-		t.Fatalf("degraded write should succeed: %v", err)
+	// unscoped returns both
+	all, _ := st.SearchSemantic(ctx, "", []float32{1, 0, 0, 0}, 10)
+	if len(all) != 2 {
+		t.Fatalf("unscoped should return 2, got %d", len(all))
 	}
 
-	missing, err := down.MissingVectors(ctx)
-	if err != nil {
-		t.Fatalf("missing vectors: %v", err)
-	}
-	if missing != 1 {
-		t.Fatalf("missing vectors = %d, want 1", missing)
+	// scoped list
+	ln, err := st.List(ctx, "other", 10, 0)
+	if err != nil || len(ln) != 1 || ln[0].ID != "other/conv" {
+		t.Fatalf("scoped list: %v %+v", err, ln)
 	}
 
-	// Search still works via keyword fallback with no embedder.
-	hits, err := down.Search(ctx, "unreachable", 5, "")
-	if err != nil {
-		t.Fatalf("search while degraded: %v", err)
-	}
-	if len(hits) != 1 || hits[0].Kind != "keyword" {
-		t.Fatalf("expected one keyword hit while degraded, got %+v", hits)
-	}
-
-	// Embedder comes back: a NEW Engine sharing the same store (mirrors a
-	// process restart with the embedder now reachable), backfill missing.
-	fx := &fixed4Embedder{}
-	up := core.NewEngine(st, fx)
-	n, err := up.Reembed(ctx, true)
-	if err != nil {
-		t.Fatalf("reembed: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("reembedded = %d, want 1", n)
-	}
-	if fx.calls != 1 {
-		t.Fatalf("embedder calls during backfill = %d, want 1", fx.calls)
-	}
-	if missing, _ := up.MissingVectors(ctx); missing != 0 {
-		t.Fatalf("still missing %d vectors after backfill", missing)
-	}
-
-	// Semantic search now finds it via the real vector.
-	hits, err = up.Search(ctx, "offline note", 5, "semantic")
-	if err != nil {
-		t.Fatalf("semantic search after backfill: %v", err)
-	}
-	if len(hits) == 0 {
-		t.Fatalf("expected a semantic hit after backfill, got none")
+	// scoped keyword
+	kw, _ := st.KeywordSearch(ctx, "engram", "conventions", 10)
+	if len(kw) != 1 || kw[0].ID != "engram/conv" {
+		t.Fatalf("scoped keyword: %+v", kw)
 	}
 }

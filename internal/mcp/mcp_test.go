@@ -31,13 +31,13 @@ func (s *fakeStore) Delete(_ context.Context, id string) error {
 	delete(s.notes, id)
 	return nil
 }
-func (s *fakeStore) List(_ context.Context, _, _ int) ([]core.Note, error) { return nil, nil }
-func (s *fakeStore) Count(_ context.Context) (int, error)                  { return len(s.notes), nil }
-func (s *fakeStore) MissingVectorIDs(_ context.Context) ([]string, error)  { return nil, nil }
-func (s *fakeStore) SearchSemantic(_ context.Context, _ []float32, _ int) ([]core.SearchHit, error) {
+func (s *fakeStore) List(_ context.Context, _ string, _, _ int) ([]core.Note, error) { return nil, nil }
+func (s *fakeStore) Count(_ context.Context) (int, error)                            { return len(s.notes), nil }
+func (s *fakeStore) MissingVectorIDs(_ context.Context) ([]string, error)            { return nil, nil }
+func (s *fakeStore) SearchSemantic(_ context.Context, _ string, _ []float32, _ int) ([]core.SearchHit, error) {
 	return nil, nil
 }
-func (s *fakeStore) KeywordSearch(_ context.Context, _ string, _ int) ([]core.Note, error) {
+func (s *fakeStore) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
 	return nil, nil
 }
 func (s *fakeStore) Backlinks(_ context.Context, _ string) ([]core.Backlink, error) {

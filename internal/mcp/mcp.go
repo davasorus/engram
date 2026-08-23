@@ -1,5 +1,5 @@
 // Package mcp exposes the engram engine as MCP tools. It's a thin adapter:
-// every handler just calls the shared core.Engine, so MCP and REST behave
+// every handler just calls the shared engine, so MCP and REST behave
 // identically. The server is served over streamable HTTP (and can also run
 // over stdio).
 package mcp
@@ -18,31 +18,40 @@ import (
 
 // Adapter wires a core.Engine to an MCP server.
 type Adapter struct {
-	eng     *core.Engine
-	server  *mcp.Server
-	allowed map[string]bool
+	eng    *core.Engine
+	server *mcp.Server
+	allow  map[string]bool // nil/empty => expose all tools
 }
 
-// New wires the engine into an MCP server. allowedTools restricts the
-// exposed tool surface (nil or empty = all tools). Smaller local models
-// call tools more reliably when there are fewer to choose from, so an
-// agent-facing deployment typically wants e.g. mem_search,mem_read,mem_write.
-func New(eng *core.Engine, allowedTools []string) *Adapter {
+// New builds the adapter. allow is an optional allowlist of tool names
+// (e.g. from ENGRAM_MCP_TOOLS / -mcp-tools). When empty, all tools are
+// exposed. Entries are matched case-insensitively and trimmed, so a
+// human-edited "mem_search, MEM_READ " behaves as expected. Unknown entries
+// are ignored (they simply match no tool).
+func New(eng *core.Engine, allow []string) *Adapter {
 	s := mcp.NewServer(&mcp.Implementation{Name: "engram", Version: "0.1.0"}, nil)
-	a := &Adapter{eng: eng, server: s, allowed: map[string]bool{}}
-	for _, t := range allowedTools {
-		if t = strings.ToLower(strings.TrimSpace(t)); t != "" {
-			a.allowed[t] = true
-		}
-	}
+	a := &Adapter{eng: eng, server: s, allow: normalizeAllow(allow)}
 	a.registerTools()
 	return a
 }
 
-// enabled reports whether a tool should be registered. An empty allowlist
-// means everything is enabled.
+func normalizeAllow(allow []string) map[string]bool {
+	m := map[string]bool{}
+	for _, name := range allow {
+		n := strings.ToLower(strings.TrimSpace(name))
+		if n != "" {
+			m[n] = true
+		}
+	}
+	return m
+}
+
+// enabled reports whether a tool should be registered given the allowlist.
 func (a *Adapter) enabled(name string) bool {
-	return len(a.allowed) == 0 || a.allowed[name]
+	if len(a.allow) == 0 {
+		return true
+	}
+	return a.allow[strings.ToLower(name)]
 }
 
 // Server exposes the underlying MCP server (for stdio runs).
@@ -56,18 +65,20 @@ func (a *Adapter) HTTPHandler() http.Handler {
 // --- tool input types (the SDK derives JSON schemas from these) ------------
 
 type searchIn struct {
-	Query string `json:"query" jsonschema:"the natural-language search query"`
-	Limit int    `json:"limit,omitempty" jsonschema:"max results (default 10)"`
-	Kind  string `json:"kind,omitempty" jsonschema:"'semantic' (default) or 'keyword'"`
+	Query   string `json:"query" jsonschema:"the natural-language search query"`
+	Project string `json:"project,omitempty" jsonschema:"restrict to this project scope (optional; omit to search all)"`
+	Limit   int    `json:"limit,omitempty" jsonschema:"max results (default 10)"`
+	Kind    string `json:"kind,omitempty" jsonschema:"'semantic' (default) or 'keyword'"`
 }
 type readIn struct {
 	ID string `json:"id" jsonschema:"the note id"`
 }
 type writeIn struct {
-	ID    string   `json:"id,omitempty" jsonschema:"note id; derived from title if omitted"`
-	Title string   `json:"title" jsonschema:"note title (required)"`
-	Body  string   `json:"body" jsonschema:"markdown body"`
-	Tags  []string `json:"tags,omitempty" jsonschema:"optional tags"`
+	ID      string   `json:"id,omitempty" jsonschema:"note id; derived from title if omitted"`
+	Project string   `json:"project,omitempty" jsonschema:"project scope this memory belongs to; prefixes the derived id"`
+	Title   string   `json:"title" jsonschema:"note title (required)"`
+	Body    string   `json:"body" jsonschema:"markdown body"`
+	Tags    []string `json:"tags,omitempty" jsonschema:"optional tags"`
 }
 type patchIn struct {
 	ID     string `json:"id" jsonschema:"note id"`
@@ -78,8 +89,9 @@ type linksIn struct {
 	ID string `json:"id" jsonschema:"note id or title to find backlinks for"`
 }
 type listIn struct {
-	Limit  int `json:"limit,omitempty"`
-	Offset int `json:"offset,omitempty"`
+	Project string `json:"project,omitempty" jsonschema:"restrict to this project scope (optional)"`
+	Limit   int    `json:"limit,omitempty"`
+	Offset  int    `json:"offset,omitempty"`
 }
 type deleteIn struct {
 	ID string `json:"id" jsonschema:"note id to delete"`
@@ -91,7 +103,7 @@ func (a *Adapter) registerTools() {
 			Name:        "mem_search",
 			Description: "Search the agent's memory by meaning (semantic) or keyword. Returns ranked notes with scores.",
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
-			hits, err := a.eng.Search(ctx, in.Query, in.Limit, in.Kind)
+			hits, err := a.eng.Search(ctx, in.Project, in.Query, in.Limit, in.Kind)
 			if err != nil {
 				return errResult(err), nil, nil
 			}
@@ -120,7 +132,7 @@ func (a *Adapter) registerTools() {
 			Name:        "mem_write",
 			Description: "Create or update a memory note. The body is markdown; [[wikilinks]] are parsed into links, and the note is embedded for semantic search.",
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, in writeIn) (*mcp.CallToolResult, any, error) {
-			n, err := a.eng.Write(ctx, core.WriteInput{ID: in.ID, Title: in.Title, Body: in.Body, Tags: in.Tags})
+			n, err := a.eng.Write(ctx, core.WriteInput{ID: in.ID, Project: in.Project, Title: in.Title, Body: in.Body, Tags: in.Tags})
 			if err != nil {
 				return errResult(err), nil, nil
 			}
@@ -144,7 +156,7 @@ func (a *Adapter) registerTools() {
 	if a.enabled("mem_links") {
 		mcp.AddTool(a.server, &mcp.Tool{
 			Name:        "mem_links",
-			Description: "List backlinks: notes that link to the given note id or title.",
+			Description: "List backlinks: notes out of the given note id or title.",
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, in linksIn) (*mcp.CallToolResult, any, error) {
 			bl, err := a.eng.Backlinks(ctx, in.ID)
 			if err != nil {
@@ -159,7 +171,7 @@ func (a *Adapter) registerTools() {
 			Name:        "mem_list",
 			Description: "List notes, most-recently-updated first.",
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, in listIn) (*mcp.CallToolResult, any, error) {
-			ns, err := a.eng.List(ctx, in.Limit, in.Offset)
+			ns, err := a.eng.List(ctx, in.Project, in.Limit, in.Offset)
 			if err != nil {
 				return errResult(err), nil, nil
 			}
