@@ -152,6 +152,28 @@ spec:
       # or localhost, depending on setup) actually work, and is why the db
       # is reached at ENGRAM_DB_HOST=localhost rather than a service name.
       hostNetwork: true
+      # Liquibase runs the changelog against Postgres and must finish before
+      # the engram container starts — engram assumes the schema exists and
+      # fails fast otherwise. The changelog is baked into the migration image
+      # (db/Dockerfile) — the single source of truth, same image compose uses —
+      # so there is no changelog ConfigMap to keep in sync. Keep the JDBC
+      # host/port aligned with ENGRAM_DB_HOST/ENGRAM_DB_PORT in engram-config.
+      initContainers:
+        - name: migrate
+          image: ghcr.io/davasorus/engram-migrate:latest
+          imagePullPolicy: Always
+          args:
+            - "--url=jdbc:postgresql://localhost:$(ENGRAM_DB_PORT)/$(ENGRAM_DB_NAME)"
+            - "--username=$(ENGRAM_DB_USER)"
+            - "--password=$(ENGRAM_DB_PASSWORD)"
+            - "--changelog-file=changelog/changelog-master.yaml"
+            - "update"
+          envFrom:
+            - configMapRef: { name: engram-config }
+          env:
+            - name: ENGRAM_DB_PASSWORD
+              valueFrom:
+                { secretKeyRef: { name: engram-db, key: POSTGRES_PASSWORD } }
       containers:
         - name: engram
           image: ghcr.io/davasorus/engram:latest # ships as a release artifact; latest keeps it evergreen

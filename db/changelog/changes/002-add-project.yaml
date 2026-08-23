@@ -1,0 +1,44 @@
+# Feature: project scoping. Additive migration — adds a nullable `project`
+# column to notes so memories can be scoped to a project. Existing rows get
+# NULL (unscoped); the application treats NULL as "no project" via
+# COALESCE(project,'') in its queries.
+#
+# Each changeset is guarded by a precondition so it is safe to run against a
+# database that already has the column/index (onFail: MARK_RAN records it as
+# applied and moves on).
+databaseChangeLog:
+  - changeSet:
+      id: 010-add-project-column
+      author: engram
+      comment: nullable project scope on notes (existing rows remain NULL/unscoped)
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                tableName: notes
+                columnName: project
+      changes:
+        - addColumn:
+            tableName: notes
+            columns:
+              - column: { name: project, type: TEXT }
+      rollback:
+        - dropColumn: { tableName: notes, columnName: project }
+
+  - changeSet:
+      id: 011-project-index
+      author: engram
+      comment: index for project-scoped lookups
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - indexExists:
+                indexName: idx_notes_project
+      changes:
+        - createIndex:
+            tableName: notes
+            indexName: idx_notes_project
+            columns:
+              - column: { name: project }
+      rollback:
+        - dropIndex: { tableName: notes, indexName: idx_notes_project }

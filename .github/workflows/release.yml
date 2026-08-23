@@ -51,3 +51,20 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Migration image: Liquibase + the changelog (db/Dockerfile). Published
+      # alongside engram and tagged identically, so compose/kube can pull
+      # ghcr.io/davasorus/engram-migrate:<version>. The changelog lives only
+      # in db/changelog — this image is its single deploy-time home.
+      - name: Build & push migrate image
+        # Derive the version without the leading 'v' so the migrate image tag
+        # matches engram's GoReleaser tags (engram:0.4.0, not v0.4.0).
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Building engram-migrate:${VERSION}"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --file db/Dockerfile \
+            --tag "ghcr.io/davasorus/engram-migrate:${VERSION}" \
+            --tag "ghcr.io/davasorus/engram-migrate:latest" \
+            --push \
+            .

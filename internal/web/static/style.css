@@ -73,7 +73,7 @@ h1 { font-size: 24px; margin: 0 0 16px; }
 /* editor */
 .editor { display: flex; flex-direction: column; gap: 10px; }
 .ed-title { font-size: 20px; }
-.ed-title, .ed-tags {
+.ed-title, .ed-tags, .ed-project {
   background: var(--panel); border: 1px solid var(--line); color: var(--ink);
   padding: 8px 12px; border-radius: 6px;
 }

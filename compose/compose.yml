@@ -43,6 +43,29 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # Liquibase runs the changelog against Postgres and exits. engram waits for
+  # this to complete successfully before starting, so the schema is always
+  # present and versioned (databasechangelog table) before the app connects.
+  # The changelog lives in ../db/changelog and is mounted read-only.
+  migrate:
+    # The migration image bakes in the changelog (db/Dockerfile), so the
+    # schema is defined in exactly one place — db/changelog — and never
+    # duplicated into a bind mount or ConfigMap. Published alongside engram.
+    # Dev overlay (Compose.dev.yml) builds this locally instead of pulling.
+    image: ghcr.io/davasorus/engram-migrate:${ENGRAM_VERSION:-latest}
+    container_name: engram-migrate
+    network_mode: host
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - --url=jdbc:postgresql://localhost:${ENGRAM_PG_PORT:-5432}/${POSTGRES_DB:-engram}
+      - --username=${POSTGRES_USER:-engram}
+      - --password=${POSTGRES_PASSWORD:-engram}
+      - --changelog-file=changelog/changelog-master.yaml
+      - update
+    restart: "no"
+
   engram:
     image: ghcr.io/davasorus/engram:${ENGRAM_VERSION:-latest}
     container_name: engram
@@ -50,6 +73,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       ENGRAM_ADDR: ":${ENGRAM_PORT:-8088}"
       ENGRAM_DSN: "postgres://${POSTGRES_USER:-engram}:${POSTGRES_PASSWORD:-engram}@localhost:${ENGRAM_PG_PORT:-5432}/${POSTGRES_DB:-engram}?sslmode=disable"

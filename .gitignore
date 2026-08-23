@@ -10,4 +10,3 @@ compose/.env
 node_modules/
 
 *.bak
-kube/.env
