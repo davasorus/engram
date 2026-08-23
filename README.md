@@ -85,7 +85,7 @@ Configure the agent's MCP client with an HTTP server at
 - **Web UI** — browse, view (rendered markdown: GFM, callouts, mermaid, KaTeX),
   semantic/keyword search, and a live-preview editor with wikilink autocomplete.
 
-## Dependencies (community/standard, not hand-rolled)
+## Dependencies
 
 - `jackc/pgx` + `pgvector/pgvector-go` — Postgres driver and vector types.
 - `yuin/goldmark` (+ GFM) — markdown rendering.
@@ -110,6 +110,10 @@ Configure the agent's MCP client with an HTTP server at
 - Changing embedding models with a different width requires migrating the
   `vector(N)` column and re-embedding (`POST /api/reembed`).
 - The `pgdata` volume is the backup unit — the whole vault lives there.
+
+## AI Usage
+
+- This was created using a combination of Online Claude Code and offline [gemma-4-12B](https://huggingface.co/google/gemma-4-12B)
 
 ## Development
 
