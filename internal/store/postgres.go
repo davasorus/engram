@@ -191,7 +191,7 @@ func (p *Postgres) outgoingLinks(ctx context.Context, id string) ([]string, erro
 }
 
 func (p *Postgres) Delete(ctx context.Context, id string) error {
-	_, err := p.pool.Exec(ctx, `DELETE FROM notes WHERE id=$1`)
+	_, err := p.pool.Exec(ctx, `DELETE FROM notes WHERE id=$1`, id)
 	return err
 }
 
