@@ -116,14 +116,10 @@ func (p *Postgres) Upsert(ctx context.Context, n core.Note) error {
 	_, err = tx.Exec(ctx, `
 INSERT INTO notes (id,project,title,body,frontmatter,tags,content_hash,embedding,created,updated)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-INSERT INTO notes (id,project,title,body,frontmatter,tags,content_hash,embedding,created,updated)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 ON CONFLICT (id) DO UPDATE SET
-  project=EXCLUDED.project, title=EXCLUDED.title, body=EXCLUDED.body, frontmatter=EXCLUDED.frontmatter,
   project=EXCLUDED.project, title=EXCLUDED.title, body=EXCLUDED.body, frontmatter=EXCLUDED.frontmatter,
   tags=EXCLUDED.tags, content_hash=EXCLUDED.content_hash, embedding=EXCLUDED.embedding,
   updated=EXCLUDED.updated`,
-		n.ID, n.Project, n.Title, n.Body, string(fm), string(tags), n.ContentHash, emb,
 		n.ID, n.Project, n.Title, n.Body, string(fm), string(tags), n.ContentHash, emb,
 		n.Created, n.Updated)
 	if err != nil {
@@ -166,7 +162,6 @@ func (p *Postgres) scanOne(ctx context.Context, q string, args ...any) (*core.No
 		fm, tags []byte
 	)
 	if err := row.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated); err != nil {
-	if err := row.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal(fm, &n.Frontmatter)
@@ -197,7 +192,6 @@ func (p *Postgres) Delete(ctx context.Context, id string) error {
 }
 
 func (p *Postgres) List(ctx context.Context, project string, limit, offset int) ([]core.Note, error) {
-func (p *Postgres) List(ctx context.Context, project string, limit, offset int) ([]core.Note, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -223,7 +217,6 @@ func (p *Postgres) scanMany(rows pgx.Rows) ([]core.Note, error) {
 			fm, tags []byte
 		)
 		if err := rows.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated); err != nil {
-		if err := rows.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(fm, &n.Frontmatter)
@@ -241,7 +234,6 @@ func (p *Postgres) Count(ctx context.Context) (int, error) {
 
 // SearchSemantic runs pgvector KNN directly in SQL — the DB does the ranking,
 // so this scales with the HNSW index instead of pulling all vectors into Go.
-func (p *Postgres) SearchSemantic(ctx context.Context, project string, query []float32, limit int) ([]core.SearchHit, error) {
 func (p *Postgres) SearchSemantic(ctx context.Context, project string, query []float32, limit int) ([]core.SearchHit, error) {
 	if limit <= 0 {
 		limit = 10
@@ -265,7 +257,6 @@ WHERE embedding IS NOT NULL
 ORDER BY embedding <=> $1
 LIMIT $2`, pgvector.NewVector(query), limit)
 	}
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +269,6 @@ LIMIT $2`, pgvector.NewVector(query), limit)
 			score    float64
 		)
 		if err := rows.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated, &score); err != nil {
-		if err := rows.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated, &score); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(fm, &n.Frontmatter)
@@ -288,7 +278,6 @@ LIMIT $2`, pgvector.NewVector(query), limit)
 	return hits, rows.Err()
 }
 
-func (p *Postgres) KeywordSearch(ctx context.Context, project, q string, limit int) ([]core.Note, error) {
 func (p *Postgres) KeywordSearch(ctx context.Context, project, q string, limit int) ([]core.Note, error) {
 	if limit <= 0 {
 		limit = 20
@@ -311,7 +300,6 @@ WHERE to_tsvector('english', title || ' ' || body) @@ plainto_tsquery('english',
    OR lower(title) LIKE '%' || lower($1) || '%'
 ORDER BY updated DESC
 LIMIT $2`, q, limit)
-	}
 	}
 	if err != nil {
 		return nil, err
