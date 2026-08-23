@@ -7,14 +7,16 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/davasorus/engram/internal/core"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
+
+	"github.com/davasorus/engram/internal/core"
 )
 
 type Postgres struct {
@@ -104,7 +106,12 @@ func (p *Postgres) Upsert(ctx context.Context, n core.Note) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		if err := tx.Rollback(ctx); err != nil {
+			// log or handle error if needed, but for now just suppress it as rollback is a best-effort on failure
+			_ = fmt.Errorf("rollback failed: %w", err)
+		}
+	}()
 
 	var emb any
 	if len(n.Vector) > 0 {
@@ -142,10 +149,10 @@ ON CONFLICT (id) DO UPDATE SET
 
 func (p *Postgres) Get(ctx context.Context, id string) (*core.Note, error) {
 	n, err := p.scanOne(ctx, `SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated FROM notes WHERE id=$1`, id)
-	if err == pgx.ErrNoRows {
-		return nil, nil
-	}
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	n.Links, _ = p.outgoingLinks(ctx, id)
@@ -184,7 +191,7 @@ func (p *Postgres) outgoingLinks(ctx context.Context, id string) ([]string, erro
 }
 
 func (p *Postgres) Delete(ctx context.Context, id string) error {
-	_, err := p.pool.Exec(ctx, `DELETE FROM notes WHERE id=$1`, id)
+	_, err := p.pool.Exec(ctx, `DELETE FROM notes WHERE id=$1`)
 	return err
 }
 

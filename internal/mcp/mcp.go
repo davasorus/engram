@@ -1,5 +1,5 @@
 // Package mcp exposes the engram engine as MCP tools. It's a thin adapter:
-// every handler just calls the shared core.Engine, so MCP and REST behave
+// every handler just calls the shared engine, so MCP and REST behave
 // identically. The server is served over streamable HTTP (and can also run
 // over stdio).
 package mcp
@@ -11,8 +11,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/davasorus/engram/internal/core"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/davasorus/engram/internal/core"
 )
 
 // Adapter wires a core.Engine to an MCP server.
@@ -155,7 +156,7 @@ func (a *Adapter) registerTools() {
 	if a.enabled("mem_links") {
 		mcp.AddTool(a.server, &mcp.Tool{
 			Name:        "mem_links",
-			Description: "List backlinks: notes that link to the given note id or title.",
+			Description: "List backlinks: notes out of the given note id or title.",
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, in linksIn) (*mcp.CallToolResult, any, error) {
 			bl, err := a.eng.Backlinks(ctx, in.ID)
 			if err != nil {

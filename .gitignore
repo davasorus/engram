@@ -8,3 +8,5 @@ compose/.env
 *.swp
 *~
 node_modules/
+
+*.bak
