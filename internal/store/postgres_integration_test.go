@@ -10,8 +10,11 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/davasorus/engram/internal/core"
 	"github.com/davasorus/engram/internal/store"
