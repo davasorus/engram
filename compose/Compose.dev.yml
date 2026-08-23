@@ -1,7 +1,12 @@
-# Development overlay: build engram from local source instead of pulling
-# the published GHCR image. Usage (from the compose/ directory):
-#   podman-compose -f compose.yml -f compose.dev.yml up -d --build
+# Development overlay: build engram AND the migration image from local source
+# instead of pulling the published GHCR images. Usage (from compose/):
+#   podman-compose -f compose.yml -f Compose.dev.yml up -d --build
 services:
+  migrate:
+    build:
+      context: ..
+      dockerfile: db/Dockerfile
+    image: engram-migrate:local
   engram:
     build:
       context: ..

@@ -1,0 +1,169 @@
+# Initial engram schema. Postgres-specific DDL (the pgvector extension, the
+# vector(768) column type, and the HNSW/GIN index types) has no native
+# Liquibase abstraction, so those changesets use raw `sql:` blocks. Standard
+# structures use Liquibase's database-agnostic tags.
+databaseChangeLog:
+  - changeSet:
+      id: 001-extension
+      author: engram
+      comment: pgvector extension for embedding columns and KNN search
+      changes:
+        - sql:
+            sql: CREATE EXTENSION IF NOT EXISTS vector
+      rollback:
+        - sql:
+            sql: DROP EXTENSION IF EXISTS vector
+
+  - changeSet:
+      id: 002-notes-table
+      author: engram
+      comment: core notes table; embedding is vector(768) to match ENGRAM_DIMS / nomic-embed-text-v1.5
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: notes
+      changes:
+        - createTable:
+            tableName: notes
+            columns:
+              - column:
+                  {
+                    name: id,
+                    type: TEXT,
+                    constraints: { primaryKey: true, nullable: false },
+                  }
+              - column:
+                  { name: title, type: TEXT, constraints: { nullable: false } }
+              - column:
+                  { name: body, type: TEXT, constraints: { nullable: false } }
+              - column:
+                  {
+                    name: frontmatter,
+                    type: JSONB,
+                    defaultValueComputed: "'{}'",
+                    constraints: { nullable: false },
+                  }
+              - column:
+                  {
+                    name: tags,
+                    type: JSONB,
+                    defaultValueComputed: "'[]'",
+                    constraints: { nullable: false },
+                  }
+              - column:
+                  {
+                    name: content_hash,
+                    type: TEXT,
+                    defaultValue: "",
+                    constraints: { nullable: false },
+                  }
+              - column:
+                  {
+                    name: created,
+                    type: TIMESTAMPTZ,
+                    defaultValueComputed: now(),
+                    constraints: { nullable: false },
+                  }
+              - column:
+                  {
+                    name: updated,
+                    type: TIMESTAMPTZ,
+                    defaultValueComputed: now(),
+                    constraints: { nullable: false },
+                  }
+        # vector(768) has no Liquibase column-type abstraction — add via raw SQL.
+        - sql:
+            sql: ALTER TABLE notes ADD COLUMN IF NOT EXISTS embedding vector(768)
+      rollback:
+        - dropTable:
+            tableName: notes
+
+  - changeSet:
+      id: 003-links-table
+      author: engram
+      comment: outgoing [[wikilinks]], cascade-deleted with their source note
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: links
+      changes:
+        - createTable:
+            tableName: links
+            columns:
+              - column:
+                  name: src
+                  type: TEXT
+                  constraints:
+                    nullable: false
+                    references: notes(id)
+                    foreignKeyName: fk_links_src
+                    deleteCascade: true
+              - column:
+                  { name: dst, type: TEXT, constraints: { nullable: false } }
+        - addPrimaryKey:
+            tableName: links
+            columnNames: src, dst
+            constraintName: pk_links
+      rollback:
+        - dropTable:
+            tableName: links
+
+  - changeSet:
+      id: 004-index-links-dst
+      author: engram
+      comment: link-target lookup index
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - indexExists:
+                indexName: idx_links_dst
+      changes:
+        - createIndex:
+            tableName: links
+            indexName: idx_links_dst
+            columns:
+              - column: { name: dst }
+      rollback:
+        - dropIndex: { tableName: links, indexName: idx_links_dst }
+
+  - changeSet:
+      id: 004b-index-notes-updated
+      author: engram
+      comment: recency index for note listing
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - indexExists:
+                indexName: idx_notes_updated
+      changes:
+        - createIndex:
+            tableName: notes
+            indexName: idx_notes_updated
+            columns:
+              - column: { name: updated, descending: true }
+      rollback:
+        - dropIndex: { tableName: notes, indexName: idx_notes_updated }
+
+  - changeSet:
+      id: 005-hnsw-index
+      author: engram
+      comment: HNSW index for cosine-distance KNN over embeddings (pgvector-specific)
+      changes:
+        - sql:
+            sql: CREATE INDEX IF NOT EXISTS idx_notes_embedding ON notes USING hnsw (embedding vector_cosine_ops)
+      rollback:
+        - sql:
+            sql: DROP INDEX IF EXISTS idx_notes_embedding
+
+  - changeSet:
+      id: 006-fts-index
+      author: engram
+      comment: GIN full-text index for the keyword-search fallback (Postgres-specific)
+      changes:
+        - sql:
+            sql: "CREATE INDEX IF NOT EXISTS idx_notes_fts ON notes USING gin (to_tsvector('english', title || ' ' || body))"
+      rollback:
+        - sql:
+            sql: DROP INDEX IF EXISTS idx_notes_fts

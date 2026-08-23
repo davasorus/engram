@@ -2,6 +2,7 @@
 {{define "content"}}
 <div class="editor" data-id="{{.Note.ID}}" x-data="wikilinks">
   <input id="ed-title" class="ed-title" name="title" placeholder="Title" value="{{.Note.Title}}">
+  <input id="ed-project" class="ed-project" name="project" placeholder="project (optional)" value="{{.Note.Project}}">
   <input id="ed-tags" class="ed-tags" name="tags" placeholder="tags, comma, separated"
          value="{{range $i,$t := .Note.Tags}}{{if $i}}, {{end}}{{$t}}{{end}}">
 

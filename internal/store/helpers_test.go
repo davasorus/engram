@@ -9,31 +9,6 @@ package store
 
 import "testing"
 
-func TestFirstLine(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"single line", "CREATE EXTENSION IF NOT EXISTS vector", "CREATE EXTENSION IF NOT EXISTS vector"},
-		{
-			"multi-line statement",
-			"CREATE TABLE IF NOT EXISTS notes (\n  id TEXT PRIMARY KEY,\n  title TEXT NOT NULL\n)",
-			"CREATE TABLE IF NOT EXISTS notes (",
-		},
-		{"empty string", "", ""},
-		{"leading newline", "\nfoo", ""},
-		{"trailing newline only", "foo\n", "foo"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := firstLine(c.in); got != c.want {
-				t.Errorf("firstLine(%q) = %q, want %q", c.in, got, c.want)
-			}
-		})
-	}
-}
-
 func TestOrEmptyMap(t *testing.T) {
 	if got := orEmptyMap(nil); got == nil || len(got) != 0 {
 		t.Errorf("orEmptyMap(nil) = %#v, want an empty non-nil map", got)

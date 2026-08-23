@@ -38,56 +38,55 @@ func Open(ctx context.Context, dsn string, dims int) (*Postgres, error) {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 	p := &Postgres{pool: pool, dims: dims}
-	if err := p.migrate(ctx); err != nil {
+	// Schema is owned by Liquibase (a separate migration step that runs before
+	// engram starts — see db/changelog and compose's `migrate` service).
+	// engram does not create or alter tables; it only verifies the schema is
+	// present and fails fast with an actionable message if migrations haven't
+	// run yet, rather than throwing opaque "relation does not exist" errors on
+	// the first query.
+	if err := p.checkSchema(ctx); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("migrate: %w", err)
+		return nil, err
 	}
 	return p, nil
 }
 
-func (p *Postgres) migrate(ctx context.Context) error {
-	stmts := []string{
-		`CREATE EXTENSION IF NOT EXISTS vector`,
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS notes (
-  id            TEXT PRIMARY KEY,
-  project       TEXT NOT NULL DEFAULT '',
-  title         TEXT NOT NULL,
-  body          TEXT NOT NULL,
-  frontmatter   JSONB NOT NULL DEFAULT '{}',
-  tags          JSONB NOT NULL DEFAULT '[]',
-  content_hash  TEXT NOT NULL DEFAULT '',
-  embedding     vector(%d),
-  created       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated       TIMESTAMPTZ NOT NULL DEFAULT now()
-)`, p.dims),
-		// Add project column if upgrading an older table that predates it.
-		`ALTER TABLE notes ADD COLUMN IF NOT EXISTS project TEXT NOT NULL DEFAULT ''`,
-		`CREATE TABLE IF NOT EXISTS links (
-  src TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-  dst TEXT NOT NULL,
-  PRIMARY KEY (src, dst)
-)`,
-		`CREATE INDEX IF NOT EXISTS idx_links_dst ON links(dst)`,
-		`CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_notes_project ON notes(project)`,
-		// HNSW index for cosine distance. Built lazily; fine to exist before rows.
-		`CREATE INDEX IF NOT EXISTS idx_notes_embedding ON notes USING hnsw (embedding vector_cosine_ops)`,
-		// Full-text search index for keyword fallback.
-		`CREATE INDEX IF NOT EXISTS idx_notes_fts ON notes USING gin (to_tsvector('english', title || ' ' || body))`,
+// checkSchema verifies the expected schema is present. It does NOT create or
+// alter anything — that's Liquibase's job (db/changelog). It checks both that
+// the notes table exists AND that it has the columns this version of engram
+// requires, so a half-applied or out-of-date migration fails fast at startup
+// with a clear message instead of surfacing as opaque "column does not exist"
+// errors on every query later.
+func (p *Postgres) checkSchema(ctx context.Context) error {
+	var hasTable bool
+	if err := p.pool.QueryRow(ctx,
+		`SELECT to_regclass('public.notes') IS NOT NULL`).Scan(&hasTable); err != nil {
+		return fmt.Errorf("schema check query failed: %w", err)
 	}
-	for _, s := range stmts {
-		if _, err := p.pool.Exec(ctx, s); err != nil {
-			return fmt.Errorf("%s: %w", firstLine(s), err)
+	if !hasTable {
+		return fmt.Errorf("schema not initialized: the 'notes' table is missing — " +
+			"run database migrations (Liquibase) before starting engram; " +
+			"see db/changelog and docs/MIGRATIONS.md")
+	}
+	// Verify columns this engram version depends on. Add to this list when a
+	// migration introduces a column the code requires.
+	required := []string{"id", "project", "title", "body", "embedding"}
+	for _, col := range required {
+		var exists bool
+		if err := p.pool.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='notes' AND column_name=$1
+)`, col).Scan(&exists); err != nil {
+			return fmt.Errorf("schema column check failed: %w", err)
+		}
+		if !exists {
+			return fmt.Errorf("schema out of date: notes.%s is missing — "+
+				"database migrations have not fully applied; run Liquibase "+
+				"(see docs/MIGRATIONS.md) before starting engram", col)
 		}
 	}
 	return nil
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
 }
 
 func (p *Postgres) Close() error { p.pool.Close(); return nil }
@@ -107,10 +106,7 @@ func (p *Postgres) Upsert(ctx context.Context, n core.Note) error {
 		return err
 	}
 	defer func() {
-		if err := tx.Rollback(ctx); err != nil {
-			// log or handle error if needed, but for now just suppress it as rollback is a best-effort on failure
-			_ = fmt.Errorf("rollback failed: %w", err)
-		}
+		_ = tx.Rollback(ctx)
 	}()
 
 	var emb any
@@ -148,11 +144,11 @@ ON CONFLICT (id) DO UPDATE SET
 }
 
 func (p *Postgres) Get(ctx context.Context, id string) (*core.Note, error) {
-	n, err := p.scanOne(ctx, `SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated FROM notes WHERE id=$1`, id)
+	n, err := p.scanOne(ctx, `SELECT id,COALESCE(project,'') AS project,title,body,frontmatter,tags,content_hash,created,updated FROM notes WHERE id=$1`, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	n.Links, _ = p.outgoingLinks(ctx, id)
@@ -202,9 +198,9 @@ func (p *Postgres) List(ctx context.Context, project string, limit, offset int) 
 	var err error
 	var rows pgx.Rows
 	if project != "" {
-		rows, err = p.pool.Query(ctx, `SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated FROM notes WHERE project=$1 ORDER BY updated DESC LIMIT $2 OFFSET $3`, project, limit, offset)
+		rows, err = p.pool.Query(ctx, `SELECT id,COALESCE(project,'') AS project,title,body,frontmatter,tags,content_hash,created,updated FROM notes WHERE project=$1 ORDER BY updated DESC LIMIT $2 OFFSET $3`, project, limit, offset)
 	} else {
-		rows, err = p.pool.Query(ctx, `SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated FROM notes ORDER BY updated DESC LIMIT $1 OFFSET $2`, limit, offset)
+		rows, err = p.pool.Query(ctx, `SELECT id,COALESCE(project,'') AS project,title,body,frontmatter,tags,content_hash,created,updated FROM notes ORDER BY updated DESC LIMIT $1 OFFSET $2`, limit, offset)
 	}
 	if err != nil {
 		return nil, err
@@ -246,7 +242,7 @@ func (p *Postgres) SearchSemantic(ctx context.Context, project string, query []f
 	var err error
 	if project != "" {
 		rows, err = p.pool.Query(ctx, `
-SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated,
+SELECT id,COALESCE(project,'') AS project,title,body,frontmatter,tags,content_hash,created,updated,
        1 - (embedding <=> $1) AS score
 FROM notes
 WHERE embedding IS NOT NULL AND project=$3
@@ -254,7 +250,7 @@ ORDER BY embedding <=> $1
 LIMIT $2`, pgvector.NewVector(query), limit, project)
 	} else {
 		rows, err = p.pool.Query(ctx, `
-SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated,
+SELECT id,COALESCE(project,'') AS project,title,body,frontmatter,tags,content_hash,created,updated,
        1 - (embedding <=> $1) AS score
 FROM notes
 WHERE embedding IS NOT NULL
@@ -290,7 +286,7 @@ func (p *Postgres) KeywordSearch(ctx context.Context, project, q string, limit i
 	var err error
 	if project != "" {
 		rows, err = p.pool.Query(ctx, `
-SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated
+SELECT id,COALESCE(project,'') AS project,title,body,frontmatter,tags,content_hash,created,updated
 FROM notes
 WHERE (to_tsvector('english', title || ' ' || body) @@ plainto_tsquery('english', $1)
    OR lower(title) LIKE '%' || lower($1) || '%') AND project=$3
@@ -298,7 +294,7 @@ ORDER BY updated DESC
 LIMIT $2`, q, limit, project)
 	} else {
 		rows, err = p.pool.Query(ctx, `
-SELECT id,project,title,body,frontmatter,tags,content_hash,created,updated
+SELECT id,COALESCE(project,'') AS project,title,body,frontmatter,tags,content_hash,created,updated
 FROM notes
 WHERE to_tsvector('english', title || ' ' || body) @@ plainto_tsquery('english', $1)
    OR lower(title) LIKE '%' || lower($1) || '%'

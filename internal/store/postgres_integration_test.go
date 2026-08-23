@@ -10,8 +10,11 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/davasorus/engram/internal/core"
 	"github.com/davasorus/engram/internal/store"
@@ -19,6 +22,40 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
+
+// applySchema creates the schema the store expects. Production schema is owned
+// by Liquibase (db/changelog); this mirrors changeset 001 so the store's query
+// paths can be exercised in isolation without running Liquibase in the test.
+// Kept deliberately in lockstep with db/changelog/changes/001-initial-schema.sql.
+func applySchema(t *testing.T, ctx context.Context, dsn string, dims int) {
+	t.Helper()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("schema connect: %v", err)
+	}
+	defer conn.Close(ctx)
+	stmts := []string{
+		`CREATE EXTENSION IF NOT EXISTS vector`,
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS notes (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL,
+  body TEXT NOT NULL, frontmatter JSONB NOT NULL DEFAULT '{}', tags JSONB NOT NULL DEFAULT '[]',
+  content_hash TEXT NOT NULL DEFAULT '', embedding vector(%d),
+  created TIMESTAMPTZ NOT NULL DEFAULT now(), updated TIMESTAMPTZ NOT NULL DEFAULT now())`, dims),
+		// project is an additive migration (db/changelog 002) — nullable column.
+		`ALTER TABLE notes ADD COLUMN IF NOT EXISTS project TEXT`,
+		`CREATE TABLE IF NOT EXISTS links (src TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE, dst TEXT NOT NULL, PRIMARY KEY (src, dst))`,
+		`CREATE INDEX IF NOT EXISTS idx_links_dst ON links(dst)`,
+		`CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_notes_project ON notes(project)`,
+		`CREATE INDEX IF NOT EXISTS idx_notes_embedding ON notes USING hnsw (embedding vector_cosine_ops)`,
+		`CREATE INDEX IF NOT EXISTS idx_notes_fts ON notes USING gin (to_tsvector('english', title || ' ' || body))`,
+	}
+	for _, s := range stmts {
+		if _, err := conn.Exec(ctx, s); err != nil {
+			t.Fatalf("apply schema: %v", err)
+		}
+	}
+}
 
 // startPG launches a pgvector container and returns a connected store.
 func startPG(t *testing.T) (*store.Postgres, func()) {
@@ -40,6 +77,7 @@ func startPG(t *testing.T) (*store.Postgres, func()) {
 	if err != nil {
 		t.Fatalf("connection string: %v", err)
 	}
+	applySchema(t, ctx, dsn, 4)        // schema is Liquibase's job in prod; apply directly here
 	st, err := store.Open(ctx, dsn, 4) // 4-dim vectors keep the test light
 	if err != nil {
 		t.Fatalf("open store: %v", err)

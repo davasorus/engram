@@ -26,6 +26,43 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+# Release notes are generated from git commits since the previous tag, grouped
+# into sections and with noise filtered out. Grouping keys off conventional
+# commit prefixes (feat:, fix:, etc.); commits without a recognized prefix fall
+# into "Other". Writing commit subjects as "feat: ...", "fix: ...", "docs: ..."
+# produces the cleanest notes, but this degrades gracefully without them.
+changelog:
+  use: git
+  sort: asc
+  filters:
+    # Drop low-signal commits from the notes entirely.
+    exclude:
+      - "^wip"
+      - "^WIP"
+      - "^Merge branch"
+      - "^Merge pull request"
+      - "^chore\\(release\\)"
+      - "typo"
+      - "^\\s*$"
+  groups:
+    - title: "Features"
+      regexp: '(?i)^feat(\(.+\))?:'
+      order: 0
+    - title: "Bug fixes"
+      regexp: '(?i)^fix(\(.+\))?:'
+      order: 1
+    - title: "Schema / migrations"
+      regexp: '(?i)^(migrat|schema|db)(\(.+\))?:'
+      order: 2
+    - title: "Documentation"
+      regexp: '(?i)^docs(\(.+\))?:'
+      order: 3
+    - title: "Build / CI / deps"
+      regexp: '(?i)^(build|ci|deps|chore)(\(.+\))?:'
+      order: 4
+    - title: "Other changes"
+      order: 999
+
 dockers:
   - image_templates:
       - "ghcr.io/davasorus/engram:{{ .Version }}-amd64"
@@ -60,6 +97,22 @@ release:
   github:
     owner: davasorus
     name: engram
+  # A short intro prepended above the generated changelog, and a footer with
+  # the full-diff link and the images published for this release.
+  header: |
+    ## engram {{ .Tag }}
+
+    Self-hosted, markdown-native memory service for AI agents.
+
+    **Container images** (multi-arch, published to GHCR):
+    - `ghcr.io/davasorus/engram:{{ .Version }}`
+    - `ghcr.io/davasorus/engram-migrate:{{ .Version }}`
+
+    Deploy or upgrade with the attached `compose.yml` + `env.example`
+    (see [UPGRADING.md](https://github.com/davasorus/engram/blob/{{ .Tag }}/docs/UPGRADING.md)).
+  footer: |
+    ---
+    {{ if .PreviousTag }}**Full changelog**: https://github.com/davasorus/engram/compare/{{ .PreviousTag }}...{{ .Tag }}{{ else }}**Full changelog**: https://github.com/davasorus/engram/commits/{{ .Tag }}{{ end }}
   # Deploy artifacts for image-only consumers: someone who pulled from GHCR
   # has no repo checkout, so the compose file, env template, and kube
   # manifest ship on the release itself (see deployHint in cmd/engram).

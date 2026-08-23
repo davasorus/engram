@@ -49,13 +49,11 @@ HNSW cosine index; keyword search uses a GIN full-text index as a fallback.
 ## Quick start (compose)
 
 ```bash
-cp compose/.env.example compose/.env
-$EDITOR compose/.env          # set POSTGRES_PASSWORD, ENGRAM_DIMS, embed URL
-cd compose && cp .env.example .env   # set POSTGRES_PASSWORD + ENGRAM_EMBED_URL
-podman-compose -f compose.yml up -d  # pulls ghcr.io/davasorus/engram
+cd compose && cp .env.example .env   # set POSTGRES_PASSWORD, ENGRAM_DIMS, ENGRAM_EMBED_URL, ENGRAM_VERSION
+podman-compose -f compose.yml up -d  # pulls engram + engram-migrate from GHCR
 
 # Developing engram itself? Build from source with the overlay:
-#   podman-compose -f compose.yml -f compose.dev.yml up -d --build
+#   podman-compose -f compose.yml -f Compose.dev.yml up -d --build
 # UI:   http://localhost:8088/
 # MCP:  http://localhost:8088/mcp/
 # REST: http://localhost:8088/api/
@@ -127,11 +125,19 @@ tests, and the pgvector integration tests on every push/PR.
 
 ## Releases
 
-Pushing a semver tag builds and publishes via GoReleaser
-(`.github/workflows/release.yml`): multi-arch binaries + a GitHub Release, and a
-multi-arch container image to **GHCR** at `ghcr.io/davasorus/engram`.
+Pushing a semver tag builds and publishes via `.github/workflows/release.yml`:
+multi-arch binaries + a GitHub Release (GoReleaser), and **two** multi-arch
+container images to **GHCR**, tagged `X.Y.Z` (no leading `v`) and `latest`:
+
+- `ghcr.io/davasorus/engram` — the service.
+- `ghcr.io/davasorus/engram-migrate` — Liquibase + the schema changelog, run
+  before engram to apply migrations (see [docs/MIGRATIONS.md](docs/MIGRATIONS.md)).
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
-podman pull ghcr.io/davasorus/engram:0.1.0
+git tag v0.4.0 && git push origin v0.4.0
+podman pull ghcr.io/davasorus/engram:0.4.0
+podman pull ghcr.io/davasorus/engram-migrate:0.4.0
 ```
+
+To upgrade a running deployment to a new release, see
+[docs/UPGRADING.md](docs/UPGRADING.md).

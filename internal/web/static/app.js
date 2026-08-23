@@ -80,13 +80,14 @@ function wikilinks() {
     save() {
       var id = document.querySelector(".editor").getAttribute("data-id") || "";
       var title = document.getElementById("ed-title").value;
+      var project = document.getElementById("ed-project").value.trim();
       var body = document.getElementById("ed-body").value;
       var tags = document.getElementById("ed-tags").value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
       this.status = "saving…";
       var self = this;
       fetch("/api/notes", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: id, title: title, body: body, tags: tags })
+        body: JSON.stringify({ id: id, title: title, project: project, body: body, tags: tags })
       }).then(function (r) { return r.json(); }).then(function (n) {
         if (n.error) { self.status = "error: " + n.error; return; }
         location.href = "/note/" + encodeURIComponent(n.id);

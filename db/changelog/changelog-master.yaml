@@ -1,0 +1,17 @@
+# Liquibase master changelog for engram.
+#
+# Runs as a separate migration step (the migration image — db/Dockerfile) BEFORE
+# the engram service starts. engram is a pure Go binary that assumes the schema
+# is already present (it verifies and fails fast otherwise). See
+# compose/compose.yml (migrate service), kube/engram.yaml (initContainer), and
+# docs/MIGRATIONS.md.
+#
+# Each feature/change is its own changeset file under changes/, included here in
+# order. The initial schema is 001; project scoping was added additively in 002.
+databaseChangeLog:
+  - include:
+      file: changes/001-initial-schema.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: changes/002-add-project.yaml
+      relativeToChangelogFile: true
