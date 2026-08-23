@@ -7,6 +7,7 @@
     <li>
       <div class="hit-head">
         <a class="hit-title" href="/note/{{.ID}}">{{.Title}}</a>
+        {{if .Project}}<span class="project-badge" title="project scope">{{.Project}}</span>{{end}}
         <span class="strength strength-{{.Label}}" title="score {{printf "%.3f" .Score}}">
           <span class="strength-bar" style="width:{{.Strength}}%"></span>
           <span class="strength-label">{{.Label}}</span>

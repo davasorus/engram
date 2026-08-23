@@ -12,6 +12,7 @@ import (
 // (frontmatter and markdown noise stripped) so results read well.
 type SearchVM struct {
 	ID       string
+	Project  string
 	Title    string
 	Excerpt  string
 	Kind     string  // "semantic" | "keyword"
@@ -26,6 +27,7 @@ func toVMs(hits []core.SearchHit) []SearchVM {
 	for _, h := range hits {
 		out = append(out, SearchVM{
 			ID:       h.Note.ID,
+			Project:  h.Note.Project,
 			Title:    cleanTitle(h.Note.Title),
 			Excerpt:  excerpt(h.Note.Body, 160),
 			Kind:     h.Kind,

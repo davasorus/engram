@@ -5,6 +5,7 @@
 {{range .Notes}}
   <li>
     <a href="/note/{{.ID}}">{{.Title}}</a>
+    {{if .Project}}<span class="project-badge" title="project scope">{{.Project}}</span>{{end}}
     <span class="meta">updated {{.Updated.Format "2006-01-02 15:04"}}</span>
     {{if .Tags}}<span class="tags">{{range .Tags}}<span class="tag">{{.}}</span>{{end}}</span>{{end}}
   </li>

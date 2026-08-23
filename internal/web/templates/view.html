@@ -3,7 +3,10 @@
 <article class="note">
   <div class="note-head">
     <h1>{{.Note.Title}}</h1>
-    <a class="editbtn" href="/edit/{{.Note.ID}}">edit</a>
+    <div class="note-head-right">
+      {{if .Note.Project}}<span class="project-badge" title="project scope">{{.Note.Project}}</span>{{end}}
+      <a class="editbtn" href="/edit/{{.Note.ID}}">edit</a>
+    </div>
   </div>
   {{if .Note.Tags}}<div class="tags">{{range .Note.Tags}}<span class="tag">{{.}}</span>{{end}}</div>{{end}}
   <div class="rendered">{{rendermd .Note.Body}}</div>

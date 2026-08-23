@@ -6,7 +6,7 @@
   {{range .Results}}
     <li>
       <a href="/note/{{.ID}}">
-        <span class="qs-title">{{.Title}}</span>
+        <span class="qs-title">{{.Title}}{{if .Project}} <span class="project-badge project-badge-sm">{{.Project}}</span>{{end}}</span>
         <span class="strength strength-{{.Label}}" title="{{.Kind}} · {{printf "%.3f" .Score}}">
           <span class="strength-bar" style="width:{{.Strength}}%"></span>
         </span>
