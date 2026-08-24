@@ -70,11 +70,18 @@ services:
     image: ghcr.io/davasorus/engram:${ENGRAM_VERSION:-latest}
     container_name: engram
     network_mode: host
+    # Only depend on the DB being healthy — NOT on migrate completing.
+    # engram tolerates an unmigrated DB on its own: store.Open runs
+    # checkSchema() inside a 30x/2s retry loop, so if it starts before the
+    # one-shot migrate finishes it simply retries until the schema appears
+    # (migrate takes ~2s). Depending on migrate here is redundant given that
+    # retry, and actively breaks podman-compose, which mistranslates
+    # `service_completed_successfully` into `--requires=engram-migrate` — a
+    # "must be RUNNING" link to a job that is supposed to EXIT, leaving engram
+    # stuck in Created state. Docker Compose honored it; podman-compose cannot.
     depends_on:
       db:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     environment:
       ENGRAM_ADDR: ":${ENGRAM_PORT:-8088}"
       ENGRAM_DSN: "postgres://${POSTGRES_USER:-engram}:${POSTGRES_PASSWORD:-engram}@localhost:${ENGRAM_PG_PORT:-5432}/${POSTGRES_DB:-engram}?sslmode=disable"
