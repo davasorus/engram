@@ -3,7 +3,7 @@
   "private": true,
   "description": "Version manifest for the vendored JS in internal/web/static. Not a build system: `npm run assets` copies dist files into static/, which are then embedded into the Go binary via go:embed. Dependabot tracks these deps; after merging a bump PR, run `npm ci && npm run assets` and commit the refreshed files.",
   "dependencies": {
-    "alpinejs": "3.16.2",
+    "alpinejs": "3.16.3",
     "htmx.org": "2.0.10"
   },
   "scripts": {
