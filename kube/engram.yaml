@@ -44,6 +44,13 @@ data:
   ENGRAM_COMPLETE_MODEL: ""
   # MCP tool allowlist for agents (empty = all nine tools).
   ENGRAM_MCP_TOOLS: "mem_search,mem_read,mem_write"
+  # Postgres connection pool tuning (all optional; empty leaves pgxpool's
+  # own default in place). Tune only if you see connection exhaustion or
+  # want to warm a minimum pool for a busy deployment.
+  ENGRAM_DB_MAX_CONNS: ""
+  ENGRAM_DB_MIN_CONNS: ""
+  ENGRAM_DB_CONN_MAX_LIFETIME: ""
+  ENGRAM_DB_CONN_MAX_IDLE_TIME: ""
   # Database identity. Password comes from the engram-db secret (step 1) —
   # by design there is no password field in this file.
   # Both pods run with hostNetwork: true (see below) — pods share the real

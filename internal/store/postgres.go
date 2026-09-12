@@ -24,14 +24,43 @@ type Postgres struct {
 	dims int
 }
 
+// PoolConfig tunes the underlying pgx connection pool. A zero value for any
+// field leaves pgxpool's own default for that setting in place, so callers
+// only need to set the knobs they actually want to change.
+type PoolConfig struct {
+	MaxConns        int32         // pgxpool default: 4 * runtime.NumCPU()
+	MinConns        int32         // pgxpool default: 0
+	MaxConnLifetime time.Duration // pgxpool default: unlimited
+	MaxConnIdleTime time.Duration // pgxpool default: 30m
+}
+
 // Open connects to Postgres, ensures the pgvector extension and schema exist,
 // and returns a Store. dims is the embedding dimensionality (e.g. 768 for
 // nomic-embed-text). The vector column is created at this width; changing
 // models with a different width requires a migration (see docs).
 func Open(ctx context.Context, dsn string, dims int) (*Postgres, error) {
+	return OpenWithPool(ctx, dsn, dims, PoolConfig{})
+}
+
+// OpenWithPool is like Open but also applies pool tuning. Use this in
+// production deployments that need to cap or grow the connection pool to
+// match Postgres's own connection limit and expected concurrency.
+func OpenWithPool(ctx context.Context, dsn string, dims int, poolCfg PoolConfig) (*Postgres, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse dsn: %w", err)
+	}
+	if poolCfg.MaxConns > 0 {
+		cfg.MaxConns = poolCfg.MaxConns
+	}
+	if poolCfg.MinConns > 0 {
+		cfg.MinConns = poolCfg.MinConns
+	}
+	if poolCfg.MaxConnLifetime > 0 {
+		cfg.MaxConnLifetime = poolCfg.MaxConnLifetime
+	}
+	if poolCfg.MaxConnIdleTime > 0 {
+		cfg.MaxConnIdleTime = poolCfg.MaxConnIdleTime
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

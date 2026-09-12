@@ -53,6 +53,10 @@ func main() {
 		mcpTools   = flag.String("mcp-tools", env("ENGRAM_MCP_TOOLS", ""), "comma-separated MCP tool allowlist, e.g. mem_search,mem_read,mem_write (empty = all tools)")
 		stdio      = flag.Bool("stdio", false, "run the MCP server over stdio instead of HTTP")
 		healthck   = flag.Bool("healthcheck", false, "probe the local /api/health endpoint and exit 0/1 (for container HEALTHCHECK)")
+		dbMaxConns = flag.Int("db-max-conns", envInt("ENGRAM_DB_MAX_CONNS", 0), "max Postgres pool connections (0 = pgxpool default: 4x CPU cores)")
+		dbMinConns = flag.Int("db-min-conns", envInt("ENGRAM_DB_MIN_CONNS", 0), "min idle Postgres pool connections to keep warm (0 = pgxpool default)")
+		dbConnLife = flag.Duration("db-conn-max-lifetime", envDuration("ENGRAM_DB_CONN_MAX_LIFETIME", 0), "max lifetime of a pooled Postgres connection, e.g. 30m (0 = pgxpool default: unlimited)")
+		dbConnIdle = flag.Duration("db-conn-max-idle-time", envDuration("ENGRAM_DB_CONN_MAX_IDLE_TIME", 0), "max idle time of a pooled Postgres connection, e.g. 5m (0 = pgxpool default: 30m)")
 	)
 	flag.Parse()
 
@@ -76,8 +80,18 @@ func main() {
 	log.Printf("engram starting: db=%s embed=%s model=%s dims=%d addr=%s",
 		redactDSN(*dsn), *embedURL, *embedModel, *dims, *addr)
 
+	poolCfg := store.PoolConfig{
+		MaxConns:        int32(*dbMaxConns),
+		MinConns:        int32(*dbMinConns),
+		MaxConnLifetime: *dbConnLife,
+		MaxConnIdleTime: *dbConnIdle,
+	}
+	if poolCfg.MaxConns > 0 || poolCfg.MinConns > 0 || poolCfg.MaxConnLifetime > 0 || poolCfg.MaxConnIdleTime > 0 {
+		log.Printf("engram: db pool tuning: max-conns=%d min-conns=%d conn-max-lifetime=%s conn-max-idle-time=%s",
+			poolCfg.MaxConns, poolCfg.MinConns, poolCfg.MaxConnLifetime, poolCfg.MaxConnIdleTime)
+	}
 	for attempt := 1; attempt <= 30; attempt++ {
-		st, err = store.Open(ctx, *dsn, *dims)
+		st, err = store.OpenWithPool(ctx, *dsn, *dims, poolCfg)
 		if err == nil {
 			break
 		}
@@ -198,6 +212,15 @@ func envInt(k string, def int) int {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return def
+}
+
+func envDuration(k string, def time.Duration) time.Duration {
+	if v := os.Getenv(k); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
 		}
 	}
 	return def
