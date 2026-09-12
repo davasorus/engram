@@ -232,6 +232,26 @@ func (p *Postgres) Count(ctx context.Context) (int, error) {
 	return n, err
 }
 
+// MissingVectorIDs returns the IDs of notes with no embedding yet, e.g.
+// written while the embed endpoint was down. Reembed's default mode uses
+// this to backfill only what's missing instead of rebuilding every vector.
+func (p *Postgres) MissingVectorIDs(ctx context.Context) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `SELECT id FROM notes WHERE embedding IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // SearchSemantic runs pgvector KNN directly in SQL — the DB does the ranking,
 // so this scales with the HNSW index instead of pulling all vectors into Go.
 func (p *Postgres) SearchSemantic(ctx context.Context, project string, query []float32, limit int) ([]core.SearchHit, error) {
