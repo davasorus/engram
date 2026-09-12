@@ -37,13 +37,17 @@ type fe struct{}
 func (fe) Model() string                                    { return "f" }
 func (fe) Embed(context.Context, string) ([]float32, error) { return []float32{1, 0}, nil }
 func TestPagesRenderOwnContent(t *testing.T) {
-	s, err := New(core.NewEngine(&ms{n: map[string]core.Note{"x": {ID: "x", Title: "T", Body: "hi"}}}, fe{}))
+	s, err := New(core.NewEngine(&ms{n: map[string]core.Note{
+		"x":                      {ID: "x", Title: "T", Body: "hi"},
+		"proj/scoped-note-title": {ID: "proj/scoped-note-title", Title: "Scoped", Body: "hi"},
+	}}, fe{}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	mux := s.Routes()
 	for _, c := range []struct{ path, want string }{
 		{"/new", `id="ed-body"`}, {"/", `notelist`}, {"/note/x", `class="rendered"`}, {"/search", `id="search-results"`}, {"/stats", `stat-num`},
+		{"/note/proj/scoped-note-title", `class="rendered"`},
 	} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest("GET", c.path, nil))

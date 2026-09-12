@@ -67,11 +67,11 @@ func (s *Server) Routes() *http.ServeMux {
 	staticFS, _ := fs.Sub(assets, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 	mux.HandleFunc("GET /{$}", s.index)
-	mux.HandleFunc("GET /note/{id}", s.view)
+	mux.HandleFunc("GET /note/{id...}", s.view)
 	mux.HandleFunc("GET /search", s.search)
 	mux.HandleFunc("GET /stats", s.stats)
 	mux.HandleFunc("GET /frag/search", s.searchFragment)
-	mux.HandleFunc("GET /edit/{id}", s.edit)
+	mux.HandleFunc("GET /edit/{id...}", s.edit)
 	mux.HandleFunc("GET /new", s.newNote)
 	mux.HandleFunc("POST /preview", s.preview)
 	return mux
