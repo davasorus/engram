@@ -159,10 +159,23 @@ tests on every push and pull request.
 
 ## Releases
 
-A pushed semver tag triggers `.github/workflows/release.yml`. This workflow
+Releases are automatic. Write commits on `live` with the [Conventional
+Commits](https://www.conventionalcommits.org/) format (`feat:`, `fix:`,
+`feat!:`, and so on).
+
+A push to `live` triggers `.github/workflows/prepare-release.yml`. This
+workflow runs semantic-release in dry-run mode. semantic-release reads the
+commits since the last tag and picks the next version: `feat` bumps minor,
+`fix` bumps patch, and a `!` or `BREAKING CHANGE` bumps major. The workflow
+then creates and pushes that tag. It skips the run when no commit warrants a
+release.
+
+The pushed tag triggers `.github/workflows/release.yml`. This workflow
 builds and publishes multi-arch binaries and a GitHub release through
-GoReleaser. It also builds and publishes two multi-arch container images to
-GHCR, tagged `X.Y.Z` (no leading `v`) and `latest`:
+GoReleaser. GoReleaser groups the same Conventional Commits into sections
+in the release notes (Features, Bug fixes, and so on). It also builds and
+publishes two multi-arch container images to GHCR, tagged `X.Y.Z` (no
+leading `v`) and `latest`:
 
 - `ghcr.io/davasorus/engram` — the service.
 - `ghcr.io/davasorus/engram-migrate` — Liquibase and the schema changelog.
@@ -170,10 +183,12 @@ GHCR, tagged `X.Y.Z` (no leading `v`) and `latest`:
   [docs/MIGRATIONS.md](docs/MIGRATIONS.md).
 
 ```bash
-git tag v0.4.0 && git push origin v0.4.0
 podman pull ghcr.io/davasorus/engram:0.4.0
 podman pull ghcr.io/davasorus/engram-migrate:0.4.0
 ```
+
+To force a specific version, run `prepare-release` manually from the
+Actions tab and set the `version` input.
 
 To upgrade a running deployment to a new release, see
 [docs/UPGRADING.md](docs/UPGRADING.md).
