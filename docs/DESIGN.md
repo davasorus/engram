@@ -123,6 +123,22 @@ edges. The store computes backlinks by reverse lookup.
   autocomplete for occasional hand edits. It is a window into the agent's
   brain, not a full PKM suite.
 
+## Command-line client
+
+The `engram` binary also acts as a REST client against a running server.
+A recognized subcommand as the first argument, for example `engram search
+foo`, switches the binary to client mode. Any other invocation, for
+example `engram -addr :9000`, starts the server as before. `internal/
+cliclient` holds the HTTP calls; each subcommand in `cmd/engram/cli.go`
+issues one REST call and prints JSON or a short message. This gives a
+human a terminal-based way to manage, inspect, or debug notes, without
+the web UI or hand-written `curl` calls.
+
+Subcommands: `health`, `search`, `list`, `get`, `write`, `patch`,
+`delete`, `links`, `suggest`, `summary`, `reembed`. Each accepts a
+`-server` flag (default `http://localhost:8088`, or `ENGRAM_CLI_SERVER`).
+Run `engram help` for the full list with per-command options.
+
 ## Packaging
 
 engram is a standalone project: a Go service and a Postgres container, a

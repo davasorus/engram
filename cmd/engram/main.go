@@ -33,6 +33,15 @@ var (
 )
 
 func main() {
+	// A recognized subcommand as the first argument runs the CLI client
+	// against a running server instead of starting one; this must be
+	// checked before flag.Parse() touches os.Args, and before any
+	// server-only flag (like -dsn) is defined, so "engram search foo"
+	// works without colliding with the server's own flag set.
+	if len(os.Args) > 1 && isCLICommand(os.Args[1]) {
+		os.Exit(runCLI(context.Background(), os.Stdout, os.Args[1:]))
+	}
+
 	var (
 		dsn        = flag.String("dsn", env("ENGRAM_DSN", ""), "Postgres connection string (overrides the ENGRAM_DB_* pieces)")
 		dims       = flag.Int("dims", envInt("ENGRAM_DIMS", 768), "embedding vector dimensionality (must match the embed model)")

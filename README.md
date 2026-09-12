@@ -95,6 +95,22 @@ flags, engram returns 501 for summary requests.
 - **Web UI** — browse notes, view rendered markdown (GFM, callouts, mermaid,
   KaTeX), run semantic, keyword, or hybrid search, and edit notes with a
   live-preview editor and wikilink autocomplete.
+- **CLI** — the same `engram` binary acts as a REST client when its first
+  argument is a subcommand. Point it at a running server and manage notes
+  from a terminal:
+
+  ```bash
+  engram health
+  engram search -kind hybrid "postgres migrations"
+  engram write -title "Meeting notes" -body-file notes.md
+  engram get meeting-notes
+  engram links meeting-notes
+  engram suggest meeting-notes
+  engram delete meeting-notes
+  ```
+
+  Run `engram help` for the full command list. Every subcommand accepts
+  `-server` (default `http://localhost:8088`, or `ENGRAM_CLI_SERVER`).
 
 ## Dependencies
 
