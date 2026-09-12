@@ -93,12 +93,13 @@ services:
       ENGRAM_DB_MIN_CONNS: "${ENGRAM_DB_MIN_CONNS:-}"
       ENGRAM_DB_CONN_MAX_LIFETIME: "${ENGRAM_DB_CONN_MAX_LIFETIME:-}"
       ENGRAM_DB_CONN_MAX_IDLE_TIME: "${ENGRAM_DB_CONN_MAX_IDLE_TIME:-}"
-    healthcheck:
-      test: ["CMD", "/engram", "-healthcheck", "-addr", ":${ENGRAM_PORT:-8088}"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+    # No healthcheck here: it's baked into the image (see Dockerfile).
+    # podman-compose mistranslates exec-form `test:` arrays into a
+    # `/bin/sh -c '...'` invocation, and this image (distroless/static) has
+    # no shell to run it with anyway. ENGRAM_PORT is respected by the app
+    # itself via ENGRAM_ADDR above; the baked-in check targets the default
+    # port :8088, so a non-default ENGRAM_PORT needs a rebuilt image or a
+    # compose override to match.
     restart: unless-stopped
 
 volumes:

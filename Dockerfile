@@ -16,4 +16,12 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/engram ./cmd/engra
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /out/engram /engram
 EXPOSE 8088
+# Exec-form HEALTHCHECK: runs the binary directly, no shell involved. This
+# image has none (distroless/static), and CMD-SHELL-style healthchecks set
+# at the compose/orchestrator level can never work here for that reason.
+# podman-compose also mistranslates exec-form `test:` arrays in compose.yml
+# healthchecks, garbling them into a broken `/bin/sh -c '...'` invocation —
+# baking the check into the image sidesteps both problems.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD ["/engram", "-healthcheck", "-addr", ":8088"]
 ENTRYPOINT ["/engram"]
