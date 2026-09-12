@@ -162,7 +162,7 @@ func TestNew_UnknownAllowlistEntryExposesNothingExtra(t *testing.T) {
 // TestMemWrite_RoundTrip is a light smoke test that a registered tool
 // actually calls through to the engine and returns something — catches a
 // handler wiring mistake (e.g. calling the wrong Engine method) that the
-// allowlist tests above wouldn't, since they only check tool NAMES.
+// allowlist tests above would not catch, since they only check tool NAMES.
 func TestMemWrite_RoundTrip(t *testing.T) {
 	eng := core.NewEngine(newFakeStore(), fakeEmbedder{})
 	a := emcp.New(eng, nil)

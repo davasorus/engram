@@ -36,7 +36,7 @@ func main() {
 		dsn        = flag.String("dsn", env("ENGRAM_DSN", ""), "Postgres connection string (overrides the ENGRAM_DB_* pieces)")
 		dims       = flag.Int("dims", envInt("ENGRAM_DIMS", 768), "embedding vector dimensionality (must match the embed model)")
 		addr       = flag.String("addr", env("ENGRAM_ADDR", ":8088"), "HTTP listen address")
-		embedURL   = flag.String("embed-url", env("ENGRAM_EMBED_URL", "http://127.0.0.1:1234"), "OpenAI-compatible embeddings base URL")
+		embedURL   = flag.String("embed-url", env("ENGRAM_EMBED_URL", "http://127.0.0.1:1234"), "OpenAI-compatible embeddings base URL(s); comma-separated for fallback, tried in order")
 		embedModel = flag.String("embed-model", env("ENGRAM_EMBED_MODEL", "text-embedding-nomic-embed-text-v1.5"), "embedding model id")
 		mcpTools   = flag.String("mcp-tools", env("ENGRAM_MCP_TOOLS", ""), "comma-separated MCP tool allowlist, e.g. mem_search,mem_read,mem_write (empty = all tools)")
 		stdio      = flag.Bool("stdio", false, "run the MCP server over stdio instead of HTTP")
@@ -80,7 +80,7 @@ func main() {
 	}
 	defer func() { _ = st.Close() }()
 
-	emb := embed.New(*embedURL, *embedModel)
+	emb := embed.NewWithFallback(strings.Split(*embedURL, ","), *embedModel)
 	eng := core.NewEngine(st, emb)
 	var allowedTools []string
 	if *mcpTools != "" {
@@ -206,7 +206,8 @@ engram needs a pgvector-enabled Postgres. This image does not bundle one.
     ENGRAM_DB_HOST/PORT/USER/PASSWORD/NAME   discrete pieces (password can
                          then come from a real secret, not a string in git)
   Plus:
-    ENGRAM_EMBED_URL     OpenAI-compatible embeddings endpoint (e.g. LM Studio)
+    ENGRAM_EMBED_URL     OpenAI-compatible embeddings endpoint (e.g. LM Studio).
+                         Accepts a comma-separated list for fallback.
 
   Kube deploy, no clone (secret is generated locally, never committed;
   all tunables live in the ConfigMap at the top of the manifest):

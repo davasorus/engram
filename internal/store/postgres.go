@@ -41,9 +41,9 @@ func Open(ctx context.Context, dsn string, dims int) (*Postgres, error) {
 	// Schema is owned by Liquibase (a separate migration step that runs before
 	// engram starts — see db/changelog and compose's `migrate` service).
 	// engram does not create or alter tables; it only verifies the schema is
-	// present and fails fast with an actionable message if migrations haven't
-	// run yet, rather than throwing opaque "relation does not exist" errors on
-	// the first query.
+	// present and fails fast with an actionable message if migrations have
+	// not run yet, rather than throwing opaque "relation does not exist"
+	// errors on the first query.
 	if err := p.checkSchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

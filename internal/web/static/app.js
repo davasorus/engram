@@ -2,7 +2,7 @@
 // (search, live preview, save); this file only holds:
 //   1. rich rendering (mermaid + KaTeX) applied after any content swap
 //   2. the Alpine component for [[wikilink]] autocomplete (caret-anchored
-//      dropdown is the one bit HTMX alone doesn't do well)
+//      dropdown is the one bit HTMX alone does not do well)
 
 // --- rich rendering ---------------------------------------------------------
 var mermaidReady = false;

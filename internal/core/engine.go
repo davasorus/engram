@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -40,14 +41,14 @@ type WriteInput struct {
 // Write creates or updates a note: parses wikilinks, hashes the body, embeds
 // it (skipping re-embed when the body is unchanged), and persists.
 func (e *Engine) Write(ctx context.Context, in WriteInput) (*Note, error) {
-	if strings.TrimSpace(in.Title) == "" {
-		return nil, fmt.Errorf("title is required")
+	if err := validateWriteInput(in); err != nil {
+		return nil, err
 	}
 	id := in.ID
 	if id == "" {
 		id = slug(in.Title)
 		// Namespace the ID by project so the same title in different projects
-		// doesn't collide (e.g. "engram/code-conventions").
+		// does not collide (e.g. "engram/code-conventions").
 		if in.Project != "" {
 			id = in.Project + "/" + id
 		}
@@ -95,19 +96,28 @@ func (e *Engine) Write(ctx context.Context, in WriteInput) (*Note, error) {
 // ambiguous (appears more than once) — mirroring the agent's file-edit
 // semantics so behavior is predictable.
 func (e *Engine) Patch(ctx context.Context, id, oldStr, newStr string) (*Note, error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(oldStr) == "" {
+		return nil, invalidf("old_str is required")
+	}
+	if len(newStr) > MaxBodyLen {
+		return nil, invalidf("new_str exceeds %d bytes", MaxBodyLen)
+	}
 	n, err := e.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if n == nil {
-		return nil, fmt.Errorf("note %q not found", id)
+		return nil, notFoundf("note %q not found", id)
 	}
 	count := strings.Count(n.Body, oldStr)
 	if count == 0 {
-		return nil, fmt.Errorf("old_str not found in note %q", id)
+		return nil, invalidf("old_str not found in note %q", id)
 	}
 	if count > 1 {
-		return nil, fmt.Errorf("old_str appears %d times in note %q; make it unique", count, id)
+		return nil, invalidf("old_str appears %d times in note %q; make it unique", count, id)
 	}
 	newBody := strings.Replace(n.Body, oldStr, newStr, 1)
 	return e.Write(ctx, WriteInput{
@@ -117,14 +127,27 @@ func (e *Engine) Patch(ctx context.Context, id, oldStr, newStr string) (*Note, e
 }
 
 func (e *Engine) Read(ctx context.Context, id string) (*Note, error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
 	return e.store.Get(ctx, id)
 }
 
 func (e *Engine) Delete(ctx context.Context, id string) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
 	return e.store.Delete(ctx, id)
 }
 
 func (e *Engine) List(ctx context.Context, project string, limit, offset int) ([]Note, error) {
+	if project != "" {
+		if err := validateID(project); err != nil {
+			return nil, invalidf("invalid project: %s", err.Error())
+		}
+	}
+	limit = clampLimit(limit, DefaultSearchLimit, MaxListLimit)
+	offset = clampOffset(offset)
 	return e.store.List(ctx, project, limit, offset)
 }
 
@@ -133,20 +156,34 @@ func (e *Engine) Count(ctx context.Context) (int, error) {
 }
 
 func (e *Engine) Backlinks(ctx context.Context, idOrTitle string) ([]Backlink, error) {
+	if strings.TrimSpace(idOrTitle) == "" {
+		return nil, invalidf("id is required")
+	}
 	return e.store.Backlinks(ctx, idOrTitle)
 }
 
-// Search runs semantic search by default; when semantic is unavailable (no
-// vectors yet) or kind=="keyword", it falls back to keyword matching. If
-// project is non-empty, results are scoped to that project.
+// Search runs semantic search by default. When kind=="keyword", it runs
+// keyword matching only. When kind=="hybrid", it combines both signals with
+// rank fusion. If semantic search is unavailable (embedding failure), the
+// default mode degrades to keyword. If project is non-empty, results are
+// scoped to that project.
 func (e *Engine) Search(ctx context.Context, project, query string, limit int, kind string) ([]SearchHit, error) {
-	if limit <= 0 {
-		limit = 10
+	if strings.TrimSpace(query) == "" {
+		return nil, invalidf("query is required")
 	}
-	if kind == "keyword" {
+	if project != "" {
+		if err := validateID(project); err != nil {
+			return nil, invalidf("invalid project: %s", err.Error())
+		}
+	}
+	limit = clampLimit(limit, DefaultSearchLimit, MaxSearchLimit)
+	switch kind {
+	case "keyword":
 		return e.keyword(ctx, project, query, limit)
+	case "hybrid":
+		return e.hybrid(ctx, project, query, limit)
 	}
-	// semantic
+	// semantic (default)
 	qv, err := e.embedder.Embed(ctx, query)
 	if err != nil {
 		// Embedding unavailable (e.g. LM Studio down): degrade to keyword.
@@ -163,6 +200,71 @@ func (e *Engine) keyword(ctx context.Context, project, query string, limit int) 
 	hits := make([]SearchHit, 0, len(notes))
 	for _, n := range notes {
 		hits = append(hits, SearchHit{Note: n, Score: 1.0, Kind: "keyword"})
+	}
+	return hits, nil
+}
+
+// hybridRRFK is the rank-fusion constant used by Reciprocal Rank Fusion
+// (RRF). A larger k flattens the influence of rank position. 60 is the
+// value from the original RRF paper and works well without tuning.
+const hybridRRFK = 60
+
+// hybrid combines semantic and keyword search with Reciprocal Rank Fusion:
+// each note's fused score is the sum, over every ranked list it appears in,
+// of 1/(hybridRRFK+rank). RRF blends the two signals without needing to
+// normalize scores that live on different scales (cosine similarity vs.
+// text-search relevance), and a note that both searches agree on ranks
+// higher than one that only one search finds.
+func (e *Engine) hybrid(ctx context.Context, project, query string, limit int) ([]SearchHit, error) {
+	// Pull more candidates than limit from each side so fusion has enough to
+	// re-rank from; a note strong in one list but weak in the other still
+	// needs to be present in both candidate sets to be scored fairly.
+	fetchLimit := clampLimit(limit*3, DefaultSearchLimit, MaxSearchLimit)
+
+	var semanticHits []SearchHit
+	var semErr error
+	qv, embErr := e.embedder.Embed(ctx, query)
+	if embErr == nil {
+		semanticHits, semErr = e.store.SearchSemantic(ctx, project, qv, fetchLimit)
+	}
+	keywordNotes, kwErr := e.store.KeywordSearch(ctx, project, query, fetchLimit)
+
+	// Only fail if both signals are unavailable; a single degraded side still
+	// yields a usable (if narrower) result set.
+	if (embErr != nil || semErr != nil) && kwErr != nil {
+		return nil, kwErr
+	}
+
+	type fused struct {
+		note  Note
+		score float64
+	}
+	byID := map[string]*fused{}
+	var order []string
+	add := func(n Note, rank int) {
+		f, ok := byID[n.ID]
+		if !ok {
+			f = &fused{note: n}
+			byID[n.ID] = f
+			order = append(order, n.ID)
+		}
+		f.score += 1.0 / float64(hybridRRFK+rank)
+	}
+	for i, h := range semanticHits {
+		add(h.Note, i+1)
+	}
+	for i, n := range keywordNotes {
+		add(n, i+1)
+	}
+
+	hits := make([]SearchHit, 0, len(order))
+	for _, id := range order {
+		f := byID[id]
+		hits = append(hits, SearchHit{Note: f.note, Score: f.score, Kind: "hybrid"})
+	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	if len(hits) > limit {
+		hits = hits[:limit]
 	}
 	return hits, nil
 }
