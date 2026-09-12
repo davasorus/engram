@@ -171,7 +171,8 @@ func (a *API) summary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) reembed(w http.ResponseWriter, r *http.Request) {
-	n, err := a.eng.Reembed(r.Context())
+	full := r.URL.Query().Get("full") == "1" || r.URL.Query().Get("full") == "true"
+	n, err := a.eng.Reembed(r.Context(), full)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

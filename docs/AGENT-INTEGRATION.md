@@ -48,7 +48,7 @@ engram stays useful when LM Studio is down.
 - `GET /api/health` reports `missing_vectors`. `GET /api/health?probe=1`
   also tests the embedder.
 - `POST /api/reembed` backfills missing vectors once LM Studio comes back.
-  Add `?all=1` to re-embed every note; use this only after you change the
+  Add `?full=1` to re-embed every note; use this only after you change the
   embedding model.
 
 Practical habit: when LM Studio comes back up, run `curl -X POST

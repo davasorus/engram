@@ -372,9 +372,19 @@ func (e *Engine) Summarize(ctx context.Context, id string) (string, error) {
 	return summary, nil
 }
 
-// Reembed rebuilds vectors for every note (e.g. after an embedding-model
-// change). Returns the number re-embedded.
-func (e *Engine) Reembed(ctx context.Context) (int, error) {
+// Reembed rebuilds vectors. When full is false (the default, cheap mode), it
+// only backfills notes with no vector yet (e.g. written while the embedder
+// was down) via the store's MissingVectorIDs. When full is true, it rebuilds
+// every note's vector unconditionally, e.g. after an embedding-model change.
+// Returns the number re-embedded.
+func (e *Engine) Reembed(ctx context.Context, full bool) (int, error) {
+	if full {
+		return e.reembedAll(ctx)
+	}
+	return e.reembedMissing(ctx)
+}
+
+func (e *Engine) reembedAll(ctx context.Context) (int, error) {
 	var n int
 	offset := 0
 	for {
@@ -386,14 +396,7 @@ func (e *Engine) Reembed(ctx context.Context) (int, error) {
 			break
 		}
 		for _, note := range batch {
-			v, err := e.embedder.Embed(ctx, embedText(note.Title, note.Body))
-			if err != nil {
-				return n, fmt.Errorf("reembed %q: %w", note.ID, err)
-			}
-			note.Vector = v
-			note.Links = parseLinks(note.Body)
-			note.ContentHash = hashBody(note.Body)
-			if err := e.store.Upsert(ctx, note); err != nil {
+			if err := e.reembedOne(ctx, note); err != nil {
 				return n, err
 			}
 			n++
@@ -401,6 +404,39 @@ func (e *Engine) Reembed(ctx context.Context) (int, error) {
 		offset += len(batch)
 	}
 	return n, nil
+}
+
+func (e *Engine) reembedMissing(ctx context.Context) (int, error) {
+	ids, err := e.store.MissingVectorIDs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var n int
+	for _, id := range ids {
+		note, err := e.store.Get(ctx, id)
+		if err != nil {
+			return n, err
+		}
+		if note == nil {
+			continue
+		}
+		if err := e.reembedOne(ctx, *note); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+func (e *Engine) reembedOne(ctx context.Context, note Note) error {
+	v, err := e.embedder.Embed(ctx, embedText(note.Title, note.Body))
+	if err != nil {
+		return fmt.Errorf("reembed %q: %w", note.ID, err)
+	}
+	note.Vector = v
+	note.Links = parseLinks(note.Body)
+	note.ContentHash = hashBody(note.Body)
+	return e.store.Upsert(ctx, note)
 }
 
 // --- helpers ----------------------------------------------------------------

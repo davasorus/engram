@@ -281,10 +281,11 @@ func cliSummary(ctx context.Context, out io.Writer, args []string) int {
 func cliReembed(ctx context.Context, out io.Writer, args []string) int {
 	fs := flag.NewFlagSet("reembed", flag.ContinueOnError)
 	server := cliServerFlag(fs)
+	full := fs.Bool("full", false, "rebuild every note's vector, not just notes missing one")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	n, err := cliclient.New(server()).Reembed(ctx)
+	n, err := cliclient.New(server()).Reembed(ctx, *full)
 	if err != nil {
 		return cliFail(out, err)
 	}
@@ -309,7 +310,7 @@ ENGRAM_CLI_SERVER):
   links <id>                      list backlinks to a note
   suggest [-limit N] <id>         suggest related notes to cross-link
   summary <id>                    summarize a note (needs --complete-url)
-  reembed                         rebuild every note's vector
+  reembed [-full]                 backfill missing vectors (-full: rebuild all)
 
 Run "engram <subcommand> -h" for a subcommand's own options.
 `

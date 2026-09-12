@@ -135,7 +135,8 @@ flags, engram returns 501 for summary requests.
 ## Notes
 
 - If you change the embedding model to a different width, you must migrate
-  the `vector(N)` column and re-embed all notes (`POST /api/reembed`).
+  the `vector(N)` column and re-embed all notes (`POST /api/reembed?full=1`).
+  Without `full=1`, reembed only backfills notes that have no vector yet.
 - The `pgdata` volume is the backup unit. The whole vault lives there.
 
 ## AI usage

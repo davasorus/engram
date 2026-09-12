@@ -92,7 +92,10 @@ edges. The store computes backlinks by reverse lookup.
 - **Sync**: because content lives in the database, the write path updates
   the body, hash, and vector atomically. There is no separate file to
   drift. A reembed operation can rebuild vectors, for example after you
-  change embedding models.
+  change embedding models. By default, `POST /api/reembed` only backfills
+  notes with no vector yet (written while the embedder was down); add
+  `?full=1` to rebuild every note's vector unconditionally, for example
+  after a model change. The CLI mirrors this with `engram reembed [-full]`.
 - **Cross-link suggestions**: `mem_suggest_links` (and
   `GET /api/notes/{id}/suggestions`) reuse the note's own vector to find
   other notes that are semantically close but not yet linked. This gives

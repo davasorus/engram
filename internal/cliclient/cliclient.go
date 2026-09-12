@@ -212,9 +212,14 @@ type reembedResponse struct {
 	Reembedded int `json:"reembedded"`
 }
 
-// Reembed calls POST /api/reembed.
-func (c *Client) Reembed(ctx context.Context) (int, error) {
+// Reembed calls POST /api/reembed. When full is true, it rebuilds every
+// note's vector (?full=1); otherwise it only backfills notes missing one.
+func (c *Client) Reembed(ctx context.Context, full bool) (int, error) {
+	path := "/api/reembed"
+	if full {
+		path += "?full=1"
+	}
 	var out reembedResponse
-	err := c.do(ctx, http.MethodPost, "/api/reembed", nil, &out)
+	err := c.do(ctx, http.MethodPost, path, nil, &out)
 	return out.Reembedded, err
 }
