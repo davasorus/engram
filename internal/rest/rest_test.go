@@ -37,6 +37,18 @@ func (m *memStore) List(_ context.Context, _ string, limit, offset int) ([]core.
 	return out, nil
 }
 func (m *memStore) Count(_ context.Context) (int, error) { return len(m.notes), nil }
+func (m *memStore) MissingVectorIDs(_ context.Context) ([]string, error) {
+	var ids []string
+	for id, n := range m.notes {
+		if len(n.Vector) == 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+func (m *memStore) Stats(_ context.Context) (core.Stats, error) {
+	return core.Stats{TotalNotes: len(m.notes)}, nil
+}
 func (m *memStore) SearchSemantic(_ context.Context, _ string, _ []float32, limit int) ([]core.SearchHit, error) {
 	var out []core.SearchHit
 	for _, n := range m.notes {
@@ -63,6 +75,24 @@ func (fakeEmbedder) Embed(context.Context, string) ([]float32, error) { return [
 
 func newAPI() http.Handler {
 	eng := core.NewEngine(newMem(), fakeEmbedder{})
+	return rest.New(eng).Routes()
+}
+
+type fakeSummarizer struct {
+	reply string
+	err   error
+}
+
+func (f fakeSummarizer) Configured() bool { return true }
+func (f fakeSummarizer) Complete(context.Context, string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.reply, nil
+}
+
+func newAPIWithSummarizer(s core.Summarizer) http.Handler {
+	eng := core.NewEngine(newMem(), fakeEmbedder{}).WithSummarizer(s)
 	return rest.New(eng).Routes()
 }
 
@@ -151,10 +181,143 @@ func TestSearchEndpoint(t *testing.T) {
 	}
 }
 
+// TestSearchHybridEndpoint confirms kind=hybrid is accepted end-to-end and
+// returns fused hits tagged with kind "hybrid".
+func TestSearchHybridEndpoint(t *testing.T) {
+	api := newAPI()
+	req := httptest.NewRequest("POST", "/api/notes", strings.NewReader(`{"title":"Doc","body":"podman notes"}`))
+	req.Header.Set("Content-Type", "application/json")
+	api.ServeHTTP(httptest.NewRecorder(), req)
+
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, httptest.NewRequest("GET", "/api/search?q=podman&kind=hybrid", nil))
+	if rec.Code != 200 {
+		t.Fatalf("search status %d: %s", rec.Code, rec.Body.String())
+	}
+	var hits []core.SearchHit
+	if err := json.Unmarshal(rec.Body.Bytes(), &hits); err != nil {
+		t.Fatalf("failed to unmarshal hits: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected at least one hybrid hit")
+	}
+	if hits[0].Kind != "hybrid" {
+		t.Fatalf("expected kind=hybrid, got %q", hits[0].Kind)
+	}
+}
+
+// TestSuggestionsEndpoint confirms GET /api/notes/{id}/suggestions returns
+// hits tagged "suggestion" and rejects a missing note with 404.
+func TestSuggestionsEndpoint(t *testing.T) {
+	api := newAPI()
+	for _, body := range []string{
+		`{"title":"Postgres backups","body":"pg_dump and WAL archiving"}`,
+		`{"title":"Postgres tuning","body":"pg_dump and WAL archiving tips"}`,
+	} {
+		req := httptest.NewRequest("POST", "/api/notes", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		api.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, httptest.NewRequest("GET", "/api/notes/postgres-backups/suggestions", nil))
+	if rec.Code != 200 {
+		t.Fatalf("suggestions status %d: %s", rec.Code, rec.Body.String())
+	}
+	var hits []core.SearchHit
+	if err := json.Unmarshal(rec.Body.Bytes(), &hits); err != nil {
+		t.Fatalf("failed to unmarshal hits: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected at least one suggestion")
+	}
+	if hits[0].Kind != "suggestion" {
+		t.Fatalf("expected kind=suggestion, got %q", hits[0].Kind)
+	}
+
+	rec = httptest.NewRecorder()
+	api.ServeHTTP(rec, httptest.NewRequest("GET", "/api/notes/nope/suggestions", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestSearchMissingQuery(t *testing.T) {
 	rec := httptest.NewRecorder()
 	newAPI().ServeHTTP(rec, httptest.NewRequest("GET", "/api/search", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+// TestGetInvalidID400 confirms an invalid id (e.g. path traversal) is a
+// client error, not a 500: writeEngErr must map core.ErrInvalidInput to 400.
+func TestGetInvalidID400(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newAPI().ServeHTTP(rec, httptest.NewRequest("GET", "/api/notes/..%2Fetc%2Fpasswd", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPatchMissingNote404 confirms a patch against a note that does not
+// exist reports 404 (core.ErrNotFound), not 400 or 500.
+func TestPatchMissingNote404(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PATCH", "/api/notes/nope", strings.NewReader(`{"old_str":"a","new_str":"b"}`))
+	req.Header.Set("Content-Type", "application/json")
+	newAPI().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSummaryEndpoint_NotConfigured confirms a deployment with no
+// completion endpoint reports 501, not a generic 500.
+func TestSummaryEndpoint_NotConfigured(t *testing.T) {
+	api := newAPI()
+	req := httptest.NewRequest("POST", "/api/notes", strings.NewReader(`{"title":"Doc","body":"some body text"}`))
+	req.Header.Set("Content-Type", "application/json")
+	api.ServeHTTP(httptest.NewRecorder(), req)
+
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, httptest.NewRequest("GET", "/api/notes/doc/summary", nil))
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSummaryEndpoint_Configured confirms a configured summarizer returns
+// its completion text through GET /api/notes/{id}/summary.
+func TestSummaryEndpoint_Configured(t *testing.T) {
+	api := newAPIWithSummarizer(fakeSummarizer{reply: "a short summary"})
+	req := httptest.NewRequest("POST", "/api/notes", strings.NewReader(`{"title":"Doc","body":"some body text"}`))
+	req.Header.Set("Content-Type", "application/json")
+	api.ServeHTTP(httptest.NewRecorder(), req)
+
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, httptest.NewRequest("GET", "/api/notes/doc/summary", nil))
+	if rec.Code != 200 {
+		t.Fatalf("summary status %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal summary body: %v", err)
+	}
+	if body["summary"] != "a short summary" {
+		t.Fatalf("summary: %q", body["summary"])
+	}
+}
+
+// TestWriteBodyTooLarge confirms an oversized request body is rejected
+// before it reaches JSON decoding or the engine.
+func TestWriteBodyTooLarge(t *testing.T) {
+	huge := strings.Repeat("a", 5*1024*1024)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/notes", strings.NewReader(`{"title":"t","body":"`+huge+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	newAPI().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

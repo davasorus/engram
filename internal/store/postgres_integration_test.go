@@ -2,7 +2,8 @@
 
 // Integration tests for the Postgres+pgvector store. They spin up a REAL
 // pgvector container via testcontainers, so they exercise the actual SQL,
-// HNSW index, and pgx round-trips — the code path that can't be unit-tested.
+// HNSW index, and pgx round-trips — the code path that cannot be
+// unit-tested.
 //
 // Run with:  go test -tags=integration ./internal/store/...
 // Requires a working Docker/Podman socket.

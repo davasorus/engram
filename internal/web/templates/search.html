@@ -13,6 +13,7 @@
     <div class="searchpage-modes">
       <label><input type="radio" name="sp-kind" value="semantic" checked @change="rerun()"> semantic <span class="dim">(by meaning)</span></label>
       <label><input type="radio" name="sp-kind" value="keyword" @change="rerun()"> keyword <span class="dim">(exact)</span></label>
+      <label><input type="radio" name="sp-kind" value="hybrid" @change="rerun()"> hybrid <span class="dim">(both)</span></label>
       <span id="sp-spin" class="htmx-indicator sp-spin">searching…</span>
     </div>
   </div>

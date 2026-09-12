@@ -68,7 +68,7 @@ type searchIn struct {
 	Query   string `json:"query" jsonschema:"the natural-language search query"`
 	Project string `json:"project,omitempty" jsonschema:"restrict to this project scope (optional; omit to search all)"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"max results (default 10)"`
-	Kind    string `json:"kind,omitempty" jsonschema:"'semantic' (default) or 'keyword'"`
+	Kind    string `json:"kind,omitempty" jsonschema:"'semantic' (default), 'keyword', or 'hybrid' (combines both)"`
 }
 type readIn struct {
 	ID string `json:"id" jsonschema:"the note id"`
@@ -88,6 +88,13 @@ type patchIn struct {
 type linksIn struct {
 	ID string `json:"id" jsonschema:"note id or title to find backlinks for"`
 }
+type suggestIn struct {
+	ID    string `json:"id" jsonschema:"note id to find cross-link suggestions for"`
+	Limit int    `json:"limit,omitempty" jsonschema:"max suggestions (default 10)"`
+}
+type summarizeIn struct {
+	ID string `json:"id" jsonschema:"note id to summarize"`
+}
 type listIn struct {
 	Project string `json:"project,omitempty" jsonschema:"restrict to this project scope (optional)"`
 	Limit   int    `json:"limit,omitempty"`
@@ -97,11 +104,13 @@ type deleteIn struct {
 	ID string `json:"id" jsonschema:"note id to delete"`
 }
 
+type statsIn struct{}
+
 func (a *Adapter) registerTools() {
 	if a.enabled("mem_search") {
 		mcp.AddTool(a.server, &mcp.Tool{
 			Name:        "mem_search",
-			Description: "Search the agent's memory by meaning (semantic) or keyword. Returns ranked notes with scores.",
+			Description: "Search the agent's memory by meaning (semantic), by keyword, or with hybrid rank fusion of both. Returns ranked notes with scores.",
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
 			hits, err := a.eng.Search(ctx, in.Project, in.Query, in.Limit, in.Kind)
 			if err != nil {
@@ -166,6 +175,32 @@ func (a *Adapter) registerTools() {
 		})
 	}
 
+	if a.enabled("mem_suggest_links") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_suggest_links",
+			Description: "Suggest notes in memory that are semantically related to a given note but not yet linked from it. Use this after writing a note to find candidates for [[wikilinks]].",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in suggestIn) (*mcp.CallToolResult, any, error) {
+			hits, err := a.eng.SuggestLinks(ctx, in.ID, in.Limit)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(hits), nil, nil
+		})
+	}
+
+	if a.enabled("mem_summarize") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_summarize",
+			Description: "Summarize a note's body in 2-3 sentences using a completion model. Only available when the deployment has a completion endpoint configured; returns an error otherwise.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in summarizeIn) (*mcp.CallToolResult, any, error) {
+			s, err := a.eng.Summarize(ctx, in.ID)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(map[string]string{"summary": s}), nil, nil
+		})
+	}
+
 	if a.enabled("mem_list") {
 		mcp.AddTool(a.server, &mcp.Tool{
 			Name:        "mem_list",
@@ -188,6 +223,19 @@ func (a *Adapter) registerTools() {
 				return errResult(err), nil, nil
 			}
 			return jsonResult(map[string]string{"deleted": in.ID}), nil, nil
+		})
+	}
+
+	if a.enabled("mem_stats") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_stats",
+			Description: "Report summary statistics about the memory store: total notes, notes per project, total links, notes missing a vector, and notes updated in the last 7 days.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, _ statsIn) (*mcp.CallToolResult, any, error) {
+			st, err := a.eng.Stats(ctx)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(st), nil, nil
 		})
 	}
 }

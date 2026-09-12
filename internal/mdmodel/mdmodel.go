@@ -71,6 +71,7 @@ func Parse(raw string) *Document {
 	var cur *Section
 	var pre strings.Builder
 	var bodyBuf strings.Builder
+	var fence string // non-empty while inside a ``` or ~~~ fenced code block
 	flush := func() {
 		if cur != nil {
 			cur.Body = bodyBuf.String()
@@ -80,10 +81,23 @@ func Parse(raw string) *Document {
 	}
 	for sc.Scan() {
 		line := sc.Text()
-		if m := atxRe.FindStringSubmatch(line); m != nil {
-			flush()
-			cur = &Section{Level: len(m[1]), Heading: m[2]}
-			continue
+		// Track fenced code blocks so a line inside one that merely looks
+		// like an ATX heading (e.g. a "# comment" in a code sample) is never
+		// mistaken for a real heading. A fence opens or closes on a line
+		// whose trimmed content starts with the same run of ``` or ~~~ that
+		// opened it (per CommonMark, the closing fence needs at least as
+		// many characters as the opening one).
+		if fenceMark, _ := fenceOpen(line); fence == "" && fenceMark != "" {
+			fence = fenceMark
+		} else if fence != "" && fenceCloses(line, fence) {
+			fence = ""
+		}
+		if fence == "" {
+			if m := atxRe.FindStringSubmatch(line); m != nil {
+				flush()
+				cur = &Section{Level: len(m[1]), Heading: m[2]}
+				continue
+			}
 		}
 		if cur == nil {
 			pre.WriteString(line)
@@ -96,6 +110,43 @@ func Parse(raw string) *Document {
 	flush()
 	d.Preamble = pre.String()
 	return d
+}
+
+// fenceOpen reports the fence marker (the run of ` or ~ characters, 3+) if
+// line opens a fenced code block, per CommonMark: the line, once trimmed of
+// up to 3 leading spaces, starts with three or more backticks or tildes.
+func fenceOpen(line string) (marker string, ok bool) {
+	t := strings.TrimLeft(line, " ")
+	if len(line)-len(t) > 3 {
+		return "", false
+	}
+	for _, ch := range []byte{'`', '~'} {
+		i := 0
+		for i < len(t) && t[i] == ch {
+			i++
+		}
+		if i >= 3 {
+			return t[:i], true
+		}
+	}
+	return "", false
+}
+
+// fenceCloses reports whether line closes a fence opened with marker: a line
+// containing only (optional leading spaces plus) a run of the same fence
+// character at least as long as the opener.
+func fenceCloses(line, marker string) bool {
+	t := strings.TrimSpace(line)
+	if len(t) < len(marker) || !strings.HasPrefix(t, marker) {
+		return false
+	}
+	ch := marker[0]
+	for _, c := range t {
+		if byte(c) != ch {
+			return false
+		}
+	}
+	return true
 }
 
 type fmRange struct{ start, after int }
@@ -170,8 +221,8 @@ func (d *Document) GetSection(heading string) (string, bool) {
 	return "", false
 }
 
-// ReplaceSection swaps the body under an existing heading. Returns false if the
-// heading isn't found.
+// ReplaceSection swaps the body under an existing heading. Returns false if
+// the heading is not found.
 func (d *Document) ReplaceSection(heading, newBody string) bool {
 	s := d.FindSection(heading)
 	if s == nil {
@@ -182,7 +233,7 @@ func (d *Document) ReplaceSection(heading, newBody string) bool {
 }
 
 // AppendToSection appends content to the end of a section's body. Creates the
-// section (at the given level, default 2) if it doesn't exist.
+// section (at the given level, default 2) if it does not exist.
 func (d *Document) AppendToSection(heading, content string, level int) {
 	s := d.FindSection(heading)
 	if s == nil {

@@ -44,8 +44,20 @@ func toVMs(hits []core.SearchHit) []SearchVM {
 // in practice cluster in ~0.3..0.8; we stretch that range so the bar is
 // visually meaningful rather than everything sitting near half.
 func strengthPct(score float64, kind string) int {
-	if kind == "keyword" {
+	switch kind {
+	case "keyword":
 		return 100
+	case "hybrid":
+		// RRF scores from two 60-constant lists top out near 2/61 (~0.033)
+		// when a note ranks #1 in both lists. Map 0 -> 0%, 0.033 -> 100%.
+		p := score / 0.033 * 100
+		if p < 0 {
+			p = 0
+		}
+		if p > 100 {
+			p = 100
+		}
+		return int(p)
 	}
 	// Map 0.30 -> 0%, 0.80 -> 100%, clamp.
 	p := (score - 0.30) / (0.80 - 0.30) * 100

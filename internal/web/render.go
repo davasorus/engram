@@ -37,7 +37,7 @@ var (
 //
 // then runs the result through goldmark.
 func RenderMarkdown(body string) string {
-	// 1. Extract mermaid fences BEFORE markdown sees them (so it doesn't treat
+	// 1. Extract mermaid fences BEFORE markdown sees them (so it does not treat
 	//    them as code). Replace with a placeholder div.
 	body = fenceRe.ReplaceAllStringFunc(body, func(m string) string {
 		sub := fenceRe.FindStringSubmatch(m)

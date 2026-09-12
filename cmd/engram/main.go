@@ -17,6 +17,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/davasorus/engram/internal/complete"
 	"github.com/davasorus/engram/internal/core"
 	"github.com/davasorus/engram/internal/embed"
 	emcp "github.com/davasorus/engram/internal/mcp"
@@ -32,15 +33,30 @@ var (
 )
 
 func main() {
+	// A recognized subcommand as the first argument runs the CLI client
+	// against a running server instead of starting one; this must be
+	// checked before flag.Parse() touches os.Args, and before any
+	// server-only flag (like -dsn) is defined, so "engram search foo"
+	// works without colliding with the server's own flag set.
+	if len(os.Args) > 1 && isCLICommand(os.Args[1]) {
+		os.Exit(runCLI(context.Background(), os.Stdout, os.Args[1:]))
+	}
+
 	var (
 		dsn        = flag.String("dsn", env("ENGRAM_DSN", ""), "Postgres connection string (overrides the ENGRAM_DB_* pieces)")
 		dims       = flag.Int("dims", envInt("ENGRAM_DIMS", 768), "embedding vector dimensionality (must match the embed model)")
 		addr       = flag.String("addr", env("ENGRAM_ADDR", ":8088"), "HTTP listen address")
-		embedURL   = flag.String("embed-url", env("ENGRAM_EMBED_URL", "http://127.0.0.1:1234"), "OpenAI-compatible embeddings base URL")
+		embedURL   = flag.String("embed-url", env("ENGRAM_EMBED_URL", "http://127.0.0.1:1234"), "OpenAI-compatible embeddings base URL(s); comma-separated for fallback, tried in order")
 		embedModel = flag.String("embed-model", env("ENGRAM_EMBED_MODEL", "text-embedding-nomic-embed-text-v1.5"), "embedding model id")
+		compURL    = flag.String("complete-url", env("ENGRAM_COMPLETE_URL", ""), "OpenAI-compatible chat-completion base URL(s); comma-separated for fallback. Optional: enables mem_summarize / GET /api/notes/{id}/summary. Empty disables the feature.")
+		compModel  = flag.String("complete-model", env("ENGRAM_COMPLETE_MODEL", ""), "chat-completion model id (required if --complete-url is set)")
 		mcpTools   = flag.String("mcp-tools", env("ENGRAM_MCP_TOOLS", ""), "comma-separated MCP tool allowlist, e.g. mem_search,mem_read,mem_write (empty = all tools)")
 		stdio      = flag.Bool("stdio", false, "run the MCP server over stdio instead of HTTP")
 		healthck   = flag.Bool("healthcheck", false, "probe the local /api/health endpoint and exit 0/1 (for container HEALTHCHECK)")
+		dbMaxConns = flag.Int("db-max-conns", envInt("ENGRAM_DB_MAX_CONNS", 0), "max Postgres pool connections (0 = pgxpool default: 4x CPU cores)")
+		dbMinConns = flag.Int("db-min-conns", envInt("ENGRAM_DB_MIN_CONNS", 0), "min idle Postgres pool connections to keep warm (0 = pgxpool default)")
+		dbConnLife = flag.Duration("db-conn-max-lifetime", envDuration("ENGRAM_DB_CONN_MAX_LIFETIME", 0), "max lifetime of a pooled Postgres connection, e.g. 30m (0 = pgxpool default: unlimited)")
+		dbConnIdle = flag.Duration("db-conn-max-idle-time", envDuration("ENGRAM_DB_CONN_MAX_IDLE_TIME", 0), "max idle time of a pooled Postgres connection, e.g. 5m (0 = pgxpool default: 30m)")
 	)
 	flag.Parse()
 
@@ -64,8 +80,18 @@ func main() {
 	log.Printf("engram starting: db=%s embed=%s model=%s dims=%d addr=%s",
 		redactDSN(*dsn), *embedURL, *embedModel, *dims, *addr)
 
+	poolCfg := store.PoolConfig{
+		MaxConns:        int32(*dbMaxConns),
+		MinConns:        int32(*dbMinConns),
+		MaxConnLifetime: *dbConnLife,
+		MaxConnIdleTime: *dbConnIdle,
+	}
+	if poolCfg.MaxConns > 0 || poolCfg.MinConns > 0 || poolCfg.MaxConnLifetime > 0 || poolCfg.MaxConnIdleTime > 0 {
+		log.Printf("engram: db pool tuning: max-conns=%d min-conns=%d conn-max-lifetime=%s conn-max-idle-time=%s",
+			poolCfg.MaxConns, poolCfg.MinConns, poolCfg.MaxConnLifetime, poolCfg.MaxConnIdleTime)
+	}
 	for attempt := 1; attempt <= 30; attempt++ {
-		st, err = store.Open(ctx, *dsn, *dims)
+		st, err = store.OpenWithPool(ctx, *dsn, *dims, poolCfg)
 		if err == nil {
 			break
 		}
@@ -80,8 +106,13 @@ func main() {
 	}
 	defer func() { _ = st.Close() }()
 
-	emb := embed.New(*embedURL, *embedModel)
+	emb := embed.NewWithFallback(strings.Split(*embedURL, ","), *embedModel)
 	eng := core.NewEngine(st, emb)
+	if *compURL != "" {
+		comp := complete.NewWithFallback(strings.Split(*compURL, ","), *compModel)
+		eng = eng.WithSummarizer(comp)
+		log.Printf("engram: summarization enabled (complete=%s model=%s)", *compURL, *compModel)
+	}
 	var allowedTools []string
 	if *mcpTools != "" {
 		allowedTools = strings.Split(*mcpTools, ",")
@@ -186,6 +217,15 @@ func envInt(k string, def int) int {
 	return def
 }
 
+func envDuration(k string, def time.Duration) time.Duration {
+	if v := os.Getenv(k); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
+}
+
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -206,7 +246,8 @@ engram needs a pgvector-enabled Postgres. This image does not bundle one.
     ENGRAM_DB_HOST/PORT/USER/PASSWORD/NAME   discrete pieces (password can
                          then come from a real secret, not a string in git)
   Plus:
-    ENGRAM_EMBED_URL     OpenAI-compatible embeddings endpoint (e.g. LM Studio)
+    ENGRAM_EMBED_URL     OpenAI-compatible embeddings endpoint (e.g. LM Studio).
+                         Accepts a comma-separated list for fallback.
 
   Kube deploy, no clone (secret is generated locally, never committed;
   all tunables live in the ConfigMap at the top of the manifest):

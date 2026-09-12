@@ -24,14 +24,43 @@ type Postgres struct {
 	dims int
 }
 
+// PoolConfig tunes the underlying pgx connection pool. A zero value for any
+// field leaves pgxpool's own default for that setting in place, so callers
+// only need to set the knobs they actually want to change.
+type PoolConfig struct {
+	MaxConns        int32         // pgxpool default: 4 * runtime.NumCPU()
+	MinConns        int32         // pgxpool default: 0
+	MaxConnLifetime time.Duration // pgxpool default: unlimited
+	MaxConnIdleTime time.Duration // pgxpool default: 30m
+}
+
 // Open connects to Postgres, ensures the pgvector extension and schema exist,
 // and returns a Store. dims is the embedding dimensionality (e.g. 768 for
 // nomic-embed-text). The vector column is created at this width; changing
 // models with a different width requires a migration (see docs).
 func Open(ctx context.Context, dsn string, dims int) (*Postgres, error) {
+	return OpenWithPool(ctx, dsn, dims, PoolConfig{})
+}
+
+// OpenWithPool is like Open but also applies pool tuning. Use this in
+// production deployments that need to cap or grow the connection pool to
+// match Postgres's own connection limit and expected concurrency.
+func OpenWithPool(ctx context.Context, dsn string, dims int, poolCfg PoolConfig) (*Postgres, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse dsn: %w", err)
+	}
+	if poolCfg.MaxConns > 0 {
+		cfg.MaxConns = poolCfg.MaxConns
+	}
+	if poolCfg.MinConns > 0 {
+		cfg.MinConns = poolCfg.MinConns
+	}
+	if poolCfg.MaxConnLifetime > 0 {
+		cfg.MaxConnLifetime = poolCfg.MaxConnLifetime
+	}
+	if poolCfg.MaxConnIdleTime > 0 {
+		cfg.MaxConnIdleTime = poolCfg.MaxConnIdleTime
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -41,9 +70,9 @@ func Open(ctx context.Context, dsn string, dims int) (*Postgres, error) {
 	// Schema is owned by Liquibase (a separate migration step that runs before
 	// engram starts — see db/changelog and compose's `migrate` service).
 	// engram does not create or alter tables; it only verifies the schema is
-	// present and fails fast with an actionable message if migrations haven't
-	// run yet, rather than throwing opaque "relation does not exist" errors on
-	// the first query.
+	// present and fails fast with an actionable message if migrations have
+	// not run yet, rather than throwing opaque "relation does not exist"
+	// errors on the first query.
 	if err := p.checkSchema(ctx); err != nil {
 		pool.Close()
 		return nil, err
@@ -230,6 +259,76 @@ func (p *Postgres) Count(ctx context.Context) (int, error) {
 	var n int
 	err := p.pool.QueryRow(ctx, `SELECT COUNT(*) FROM notes`).Scan(&n)
 	return n, err
+}
+
+// MissingVectorIDs returns the IDs of notes with no embedding yet, e.g.
+// written while the embed endpoint was down. Reembed's default mode uses
+// this to backfill only what's missing instead of rebuilding every vector.
+func (p *Postgres) MissingVectorIDs(ctx context.Context) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `SELECT id FROM notes WHERE embedding IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// Stats gathers summary counts with a handful of aggregate queries. It is
+// meant for occasional dashboard/CLI use, not a hot path, so a few round
+// trips (rather than one large UNION) keeps each query simple and readable.
+func (p *Postgres) Stats(ctx context.Context) (core.Stats, error) {
+	var st core.Stats
+
+	if err := p.pool.QueryRow(ctx, `SELECT COUNT(*) FROM notes`).Scan(&st.TotalNotes); err != nil {
+		return st, fmt.Errorf("count notes: %w", err)
+	}
+
+	rows, err := p.pool.Query(ctx, `
+SELECT project, COUNT(*) FROM notes
+WHERE project IS NOT NULL AND project <> ''
+GROUP BY project ORDER BY project`)
+	if err != nil {
+		return st, fmt.Errorf("notes by project: %w", err)
+	}
+	byProject := map[string]int{}
+	for rows.Next() {
+		var proj string
+		var n int
+		if err := rows.Scan(&proj, &n); err != nil {
+			rows.Close()
+			return st, fmt.Errorf("scan notes by project: %w", err)
+		}
+		byProject[proj] = n
+	}
+	if err := rows.Err(); err != nil {
+		return st, fmt.Errorf("notes by project: %w", err)
+	}
+	rows.Close()
+	st.NotesByProject = byProject
+	st.TotalProjects = len(byProject)
+
+	if err := p.pool.QueryRow(ctx, `SELECT COUNT(*) FROM links`).Scan(&st.TotalLinks); err != nil {
+		return st, fmt.Errorf("count links: %w", err)
+	}
+
+	if err := p.pool.QueryRow(ctx, `SELECT COUNT(*) FROM notes WHERE embedding IS NULL`).Scan(&st.NotesMissingVector); err != nil {
+		return st, fmt.Errorf("count notes missing vector: %w", err)
+	}
+
+	if err := p.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM notes WHERE updated >= now() - interval '7 days'`).Scan(&st.UpdatedLast7Days); err != nil {
+		return st, fmt.Errorf("count recently updated notes: %w", err)
+	}
+
+	return st, nil
 }
 
 // SearchSemantic runs pgvector KNN directly in SQL — the DB does the ranking,

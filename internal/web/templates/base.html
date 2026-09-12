@@ -35,15 +35,17 @@
              value="{{if .Query}}{{.Query}}{{end}}">
       <select name="qs-kind" class="qs-kind"
               @change="rerun()"
-              title="semantic = by meaning · keyword = exact words">
+              title="semantic = by meaning · keyword = exact words · hybrid = both">
         <option value="semantic">semantic</option>
         <option value="keyword">keyword</option>
+        <option value="hybrid">hybrid</option>
       </select>
       <span id="qs-spin" class="qs-spin htmx-indicator">searching…</span>
     </div>
     <div id="qs-dropdown" class="qs-dropdown" x-show="open" x-cloak></div>
   </div>
 
+  <a class="statsbtn" href="/stats">stats</a>
   <a class="newbtn" href="/new">+ new</a>
 </header>
 <main>

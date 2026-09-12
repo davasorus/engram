@@ -34,6 +34,9 @@ func (s *fakeStore) Delete(_ context.Context, id string) error {
 func (s *fakeStore) List(_ context.Context, _ string, _, _ int) ([]core.Note, error) { return nil, nil }
 func (s *fakeStore) Count(_ context.Context) (int, error)                            { return len(s.notes), nil }
 func (s *fakeStore) MissingVectorIDs(_ context.Context) ([]string, error)            { return nil, nil }
+func (s *fakeStore) Stats(_ context.Context) (core.Stats, error) {
+	return core.Stats{TotalNotes: len(s.notes)}, nil
+}
 func (s *fakeStore) SearchSemantic(_ context.Context, _ string, _ []float32, _ int) ([]core.SearchHit, error) {
 	return nil, nil
 }
@@ -92,7 +95,7 @@ func TestNew_EmptyAllowlistExposesAllTools(t *testing.T) {
 	a := emcp.New(eng, nil)
 
 	got := listToolNames(t, a)
-	want := []string{"mem_delete", "mem_links", "mem_list", "mem_patch", "mem_read", "mem_search", "mem_write"}
+	want := []string{"mem_delete", "mem_links", "mem_list", "mem_patch", "mem_read", "mem_search", "mem_stats", "mem_suggest_links", "mem_summarize", "mem_write"}
 	sort.Strings(want)
 	if len(got) != len(want) {
 		t.Fatalf("got %d tools %v, want %d %v", len(got), got, len(want), want)
@@ -162,7 +165,7 @@ func TestNew_UnknownAllowlistEntryExposesNothingExtra(t *testing.T) {
 // TestMemWrite_RoundTrip is a light smoke test that a registered tool
 // actually calls through to the engine and returns something — catches a
 // handler wiring mistake (e.g. calling the wrong Engine method) that the
-// allowlist tests above wouldn't, since they only check tool NAMES.
+// allowlist tests above would not catch, since they only check tool NAMES.
 func TestMemWrite_RoundTrip(t *testing.T) {
 	eng := core.NewEngine(newFakeStore(), fakeEmbedder{})
 	a := emcp.New(eng, nil)

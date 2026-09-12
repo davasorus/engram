@@ -23,21 +23,33 @@ type Note struct {
 	ContentHash string         `json:"content_hash,omitempty"`
 	Created     time.Time      `json:"created"`
 	Updated     time.Time      `json:"updated"`
-	// Vector is not serialized to JSON by default; it's an internal index.
+	// Vector is not serialized to JSON by default; it is an internal index.
 	Vector []float32 `json:"-"`
 }
 
 // SearchHit is a note plus its relevance to a query.
 type SearchHit struct {
 	Note  Note    `json:"note"`
-	Score float64 `json:"score"` // cosine similarity (semantic) or 1.0 (keyword)
-	Kind  string  `json:"kind"`  // "semantic" | "keyword"
+	Score float64 `json:"score"` // cosine similarity (semantic/suggestion), 1.0 (keyword), or an RRF rank-fusion score (hybrid)
+	Kind  string  `json:"kind"`  // "semantic" | "keyword" | "hybrid" | "suggestion"
 }
 
 // Backlink is a note that links TO the note being inspected.
 type Backlink struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+}
+
+// Stats summarizes the memory store's current size and health. It backs the
+// REST /api/stats endpoint, the mem_stats MCP tool, the `engram stats` CLI
+// command, and the web UI's stats panel — all four read the same numbers.
+type Stats struct {
+	TotalNotes         int            `json:"total_notes"`
+	TotalProjects      int            `json:"total_projects"`
+	NotesByProject     map[string]int `json:"notes_by_project,omitempty"`
+	TotalLinks         int            `json:"total_links"`
+	NotesMissingVector int            `json:"notes_missing_vector"`
+	UpdatedLast7Days   int            `json:"updated_last_7_days"`
 }
 
 // Store is the persistence contract. The SQLite implementation lives in
@@ -64,6 +76,11 @@ type Store interface {
 	// Count returns the total number of notes.
 	Count(ctx context.Context) (int, error)
 
+	// MissingVectorIDs returns the IDs of notes with no embedding yet (e.g.
+	// written while the embedder was down). Reembed's default, cheap mode
+	// backfills only these instead of re-embedding every note.
+	MissingVectorIDs(ctx context.Context) ([]string, error)
+
 	// SearchSemantic runs vector KNN in the database and returns ranked hits.
 	// The backend does the ranking (e.g. pgvector HNSW), so this scales
 	// without pulling all vectors into the app. If project is non-empty,
@@ -77,6 +94,10 @@ type Store interface {
 	// Backlinks returns notes whose Links contain the given id/title.
 	Backlinks(ctx context.Context, idOrTitle string) ([]Backlink, error)
 
+	// Stats returns summary counts over the whole store: notes, projects,
+	// links, notes missing a vector, and recent-activity volume.
+	Stats(ctx context.Context) (Stats, error)
+
 	// Close releases resources.
 	Close() error
 }
@@ -89,4 +110,17 @@ type Embedder interface {
 	// Model reports the model id, recorded so a model change can trigger
 	// re-embedding.
 	Model() string
+}
+
+// Summarizer turns text into a short natural-language completion. It backs
+// optional, LLM-driven features such as note summarization. Unlike Embedder,
+// a Summarizer is optional: engram has no built-in requirement for a chat/
+// completion endpoint, so a deployment can leave this unset.
+type Summarizer interface {
+	// Complete returns the model's reply to a single prompt.
+	Complete(ctx context.Context, prompt string) (string, error)
+	// Configured reports whether a completion endpoint is actually set up.
+	// A Summarizer with Configured() == false behaves as "not available":
+	// callers should report that clearly rather than attempt the call.
+	Configured() bool
 }

@@ -1,29 +1,49 @@
 name: prepare-release
 
-# Run manually (Actions tab -> prepare-release -> Run workflow) with the
-# version to release (no leading v, e.g. 0.2.0). This bumps
-# compose/.env.example, commits that bump, then creates and pushes the tag
-# ON that commit — so the tag itself (what GoReleaser builds from, and what
-# anyone checking out v0.2.0 sees) is self-consistent from the start. The
-# tag push triggers the existing `release` workflow.
+# Runs automatically on every push to `live`. It can also run manually
+# (Actions tab -> prepare-release -> Run workflow) to force a specific
+# version.
 #
-# Requires a repo secret RELEASE_PAT (contents: read/write on this repo)
-# so the push authenticates as a real account rather than github-actions[bot]
-# — needed if the `live` branch is protected and only bypasses admins/
-# specific users, not the default GITHUB_TOKEN identity.
+# In automatic mode, semantic-release inspects Conventional Commits since
+# the last tag in DRY RUN ONLY (it creates nothing) to decide whether a
+# release is warranted and, if so, the next version: feat -> minor,
+# fix -> patch, "!"/BREAKING CHANGE -> major, anything else -> no bump.
+# If there is nothing release-worthy, the workflow exits quietly.
+#
+# semantic-release only DECIDES the version here. Once the tag is pushed,
+# the existing `release` workflow builds binaries and container images and
+# writes the GitHub Release notes with GoReleaser, which groups the same
+# Conventional Commits into sections (Features, Bug fixes, ...). Keeping one
+# tool per job avoids two competing changelog renderers — version bump comes
+# from semantic-release, release note organization comes from GoReleaser.
+#
+# Requires a repo secret RELEASE_PAT (contents: read/write on this repo) so
+# the push authenticates as a real account rather than github-actions[bot]
+# — needed if `live` is protected and only bypasses admins/specific users,
+# not the default GITHUB_TOKEN identity.
 on:
+  push:
+    branches: [live]
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, no leading v (e.g. 0.2.0)"
-        required: true
+        description: "Version override, no leading v (e.g. 0.2.0). Leave blank to let semantic-release decide."
+        required: false
 
 permissions:
   contents: write
 
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
 jobs:
-  bump-and-tag:
+  tag:
     runs-on: ubuntu-latest
+    # The bump commit below is pushed with RELEASE_PAT, which re-triggers this
+    # workflow's `push` event. Skip that second run instead of letting
+    # semantic-release re-evaluate an already-tagged commit.
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release)') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -31,22 +51,53 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PAT }}
 
-      - name: validate version
+      - name: validate version override
+        if: ${{ inputs.version != '' }}
         run: |
           set -euo pipefail
           v="${{ inputs.version }}"
           [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not semver: $v" >&2; exit 1; }
-          tag="v${v}"
+
+      - name: compute next version (semantic-release, dry run)
+        id: semrel
+        if: ${{ inputs.version == '' }}
+        uses: cycjimmy/semantic-release-action@v6
+        with:
+          dry_run: true
+          semantic_version: 25
+          extra_plugins: |
+            @semantic-release/commit-analyzer
+            @semantic-release/release-notes-generator
+            conventional-changelog-conventionalcommits@9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: determine tag
+        id: next
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ inputs.version }}" ]]; then
+            tag="v${{ inputs.version }}"
+          elif [[ "${{ steps.semrel.outputs.new_release_published }}" == "true" ]]; then
+            tag="v${{ steps.semrel.outputs.new_release_version }}"
+          else
+            echo "no release-worthy commits since the last tag — nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if git rev-parse "$tag" >/dev/null 2>&1; then
             echo "tag $tag already exists" >&2
             exit 1
           fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
-      - name: bump ENGRAM_VERSION and tag
+      - name: bump ENGRAM_VERSION, commit, and tag
+        if: ${{ steps.next.outputs.skip == 'false' }}
         run: |
           set -euo pipefail
-          version="${{ inputs.version }}"
-          tag="v${version}"
+          tag="${{ steps.next.outputs.tag }}"
+          version="${tag#v}"
           sed -i -E "s/^ENGRAM_VERSION=.*/ENGRAM_VERSION=${version}/" compose/.env.example
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -54,8 +105,9 @@ jobs:
             echo "ENGRAM_VERSION already ${version}; tagging current HEAD as-is"
           else
             git add compose/.env.example
-            git commit -m "chore: release ${tag}"
+            git commit -m "chore(release): ${tag}"
+            git push origin live
           fi
           git tag -a "$tag" -m "Release ${tag}"
-          git push origin live
           git push origin "$tag"
+          echo "### Released ${tag}" >> "$GITHUB_STEP_SUMMARY"

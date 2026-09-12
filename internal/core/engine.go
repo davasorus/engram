@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -13,12 +14,21 @@ import (
 // Engine is the single source of business logic. MCP, REST, and the web UI are
 // all thin adapters over this — so the three interfaces can never drift apart.
 type Engine struct {
-	store    Store
-	embedder Embedder
+	store      Store
+	embedder   Embedder
+	summarizer Summarizer // optional; nil when no completion endpoint is configured
 }
 
 func NewEngine(s Store, e Embedder) *Engine {
 	return &Engine{store: s, embedder: e}
+}
+
+// WithSummarizer attaches an optional Summarizer (a completion client) to
+// the engine, enabling Summarize. It returns the same *Engine for chaining
+// at construction time, e.g. core.NewEngine(st, emb).WithSummarizer(comp).
+func (e *Engine) WithSummarizer(sm Summarizer) *Engine {
+	e.summarizer = sm
+	return e
 }
 
 var (
@@ -40,14 +50,14 @@ type WriteInput struct {
 // Write creates or updates a note: parses wikilinks, hashes the body, embeds
 // it (skipping re-embed when the body is unchanged), and persists.
 func (e *Engine) Write(ctx context.Context, in WriteInput) (*Note, error) {
-	if strings.TrimSpace(in.Title) == "" {
-		return nil, fmt.Errorf("title is required")
+	if err := validateWriteInput(in); err != nil {
+		return nil, err
 	}
 	id := in.ID
 	if id == "" {
 		id = slug(in.Title)
 		// Namespace the ID by project so the same title in different projects
-		// doesn't collide (e.g. "engram/code-conventions").
+		// does not collide (e.g. "engram/code-conventions").
 		if in.Project != "" {
 			id = in.Project + "/" + id
 		}
@@ -95,19 +105,28 @@ func (e *Engine) Write(ctx context.Context, in WriteInput) (*Note, error) {
 // ambiguous (appears more than once) — mirroring the agent's file-edit
 // semantics so behavior is predictable.
 func (e *Engine) Patch(ctx context.Context, id, oldStr, newStr string) (*Note, error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(oldStr) == "" {
+		return nil, invalidf("old_str is required")
+	}
+	if len(newStr) > MaxBodyLen {
+		return nil, invalidf("new_str exceeds %d bytes", MaxBodyLen)
+	}
 	n, err := e.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if n == nil {
-		return nil, fmt.Errorf("note %q not found", id)
+		return nil, notFoundf("note %q not found", id)
 	}
 	count := strings.Count(n.Body, oldStr)
 	if count == 0 {
-		return nil, fmt.Errorf("old_str not found in note %q", id)
+		return nil, invalidf("old_str not found in note %q", id)
 	}
 	if count > 1 {
-		return nil, fmt.Errorf("old_str appears %d times in note %q; make it unique", count, id)
+		return nil, invalidf("old_str appears %d times in note %q; make it unique", count, id)
 	}
 	newBody := strings.Replace(n.Body, oldStr, newStr, 1)
 	return e.Write(ctx, WriteInput{
@@ -117,14 +136,27 @@ func (e *Engine) Patch(ctx context.Context, id, oldStr, newStr string) (*Note, e
 }
 
 func (e *Engine) Read(ctx context.Context, id string) (*Note, error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
 	return e.store.Get(ctx, id)
 }
 
 func (e *Engine) Delete(ctx context.Context, id string) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
 	return e.store.Delete(ctx, id)
 }
 
 func (e *Engine) List(ctx context.Context, project string, limit, offset int) ([]Note, error) {
+	if project != "" {
+		if err := validateID(project); err != nil {
+			return nil, invalidf("invalid project: %s", err.Error())
+		}
+	}
+	limit = clampLimit(limit, DefaultSearchLimit, MaxListLimit)
+	offset = clampOffset(offset)
 	return e.store.List(ctx, project, limit, offset)
 }
 
@@ -133,20 +165,40 @@ func (e *Engine) Count(ctx context.Context) (int, error) {
 }
 
 func (e *Engine) Backlinks(ctx context.Context, idOrTitle string) ([]Backlink, error) {
+	if strings.TrimSpace(idOrTitle) == "" {
+		return nil, invalidf("id is required")
+	}
 	return e.store.Backlinks(ctx, idOrTitle)
 }
 
-// Search runs semantic search by default; when semantic is unavailable (no
-// vectors yet) or kind=="keyword", it falls back to keyword matching. If
-// project is non-empty, results are scoped to that project.
+// Stats returns summary counts over the whole memory store, for the
+// REST /api/stats endpoint, the mem_stats MCP tool, the CLI, and the web UI.
+func (e *Engine) Stats(ctx context.Context) (Stats, error) {
+	return e.store.Stats(ctx)
+}
+
+// Search runs semantic search by default. When kind=="keyword", it runs
+// keyword matching only. When kind=="hybrid", it combines both signals with
+// rank fusion. If semantic search is unavailable (embedding failure), the
+// default mode degrades to keyword. If project is non-empty, results are
+// scoped to that project.
 func (e *Engine) Search(ctx context.Context, project, query string, limit int, kind string) ([]SearchHit, error) {
-	if limit <= 0 {
-		limit = 10
+	if strings.TrimSpace(query) == "" {
+		return nil, invalidf("query is required")
 	}
-	if kind == "keyword" {
+	if project != "" {
+		if err := validateID(project); err != nil {
+			return nil, invalidf("invalid project: %s", err.Error())
+		}
+	}
+	limit = clampLimit(limit, DefaultSearchLimit, MaxSearchLimit)
+	switch kind {
+	case "keyword":
 		return e.keyword(ctx, project, query, limit)
+	case "hybrid":
+		return e.hybrid(ctx, project, query, limit)
 	}
-	// semantic
+	// semantic (default)
 	qv, err := e.embedder.Embed(ctx, query)
 	if err != nil {
 		// Embedding unavailable (e.g. LM Studio down): degrade to keyword.
@@ -167,9 +219,178 @@ func (e *Engine) keyword(ctx context.Context, project, query string, limit int) 
 	return hits, nil
 }
 
-// Reembed rebuilds vectors for every note (e.g. after an embedding-model
-// change). Returns the number re-embedded.
-func (e *Engine) Reembed(ctx context.Context) (int, error) {
+// hybridRRFK is the rank-fusion constant used by Reciprocal Rank Fusion
+// (RRF). A larger k flattens the influence of rank position. 60 is the
+// value from the original RRF paper and works well without tuning.
+const hybridRRFK = 60
+
+// hybrid combines semantic and keyword search with Reciprocal Rank Fusion:
+// each note's fused score is the sum, over every ranked list it appears in,
+// of 1/(hybridRRFK+rank). RRF blends the two signals without needing to
+// normalize scores that live on different scales (cosine similarity vs.
+// text-search relevance), and a note that both searches agree on ranks
+// higher than one that only one search finds.
+func (e *Engine) hybrid(ctx context.Context, project, query string, limit int) ([]SearchHit, error) {
+	// Pull more candidates than limit from each side so fusion has enough to
+	// re-rank from; a note strong in one list but weak in the other still
+	// needs to be present in both candidate sets to be scored fairly.
+	fetchLimit := clampLimit(limit*3, DefaultSearchLimit, MaxSearchLimit)
+
+	var semanticHits []SearchHit
+	var semErr error
+	qv, embErr := e.embedder.Embed(ctx, query)
+	if embErr == nil {
+		semanticHits, semErr = e.store.SearchSemantic(ctx, project, qv, fetchLimit)
+	}
+	keywordNotes, kwErr := e.store.KeywordSearch(ctx, project, query, fetchLimit)
+
+	// Only fail if both signals are unavailable; a single degraded side still
+	// yields a usable (if narrower) result set.
+	if (embErr != nil || semErr != nil) && kwErr != nil {
+		return nil, kwErr
+	}
+
+	type fused struct {
+		note  Note
+		score float64
+	}
+	byID := map[string]*fused{}
+	var order []string
+	add := func(n Note, rank int) {
+		f, ok := byID[n.ID]
+		if !ok {
+			f = &fused{note: n}
+			byID[n.ID] = f
+			order = append(order, n.ID)
+		}
+		f.score += 1.0 / float64(hybridRRFK+rank)
+	}
+	for i, h := range semanticHits {
+		add(h.Note, i+1)
+	}
+	for i, n := range keywordNotes {
+		add(n, i+1)
+	}
+
+	hits := make([]SearchHit, 0, len(order))
+	for _, id := range order {
+		f := byID[id]
+		hits = append(hits, SearchHit{Note: f.note, Score: f.score, Kind: "hybrid"})
+	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	return hits, nil
+}
+
+// SuggestLinks proposes notes that are semantically related to an existing
+// note but that it does not already link to. This gives agents a proactive
+// cross-linking aid: after writing a note, an agent can ask what else in
+// memory looks related and add [[wikilinks]] itself, without engram needing
+// an LLM completion call of its own — the suggestion is driven entirely by
+// the existing vector-similarity search.
+func (e *Engine) SuggestLinks(ctx context.Context, id string, limit int) ([]SearchHit, error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
+	n, err := e.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if n == nil {
+		return nil, notFoundf("note %q not found", id)
+	}
+	limit = clampLimit(limit, DefaultSearchLimit, MaxSearchLimit)
+
+	vec := n.Vector
+	if len(vec) == 0 {
+		v, err := e.embedder.Embed(ctx, embedText(n.Title, n.Body))
+		if err != nil {
+			return nil, fmt.Errorf("embed: %w", err)
+		}
+		vec = v
+	}
+
+	// Fetch extra candidates: the note itself and any note it already links
+	// to both get filtered out below, so ask for more than limit up front.
+	fetchLimit := clampLimit(limit+len(n.Links)+1, DefaultSearchLimit, MaxSearchLimit)
+	hits, err := e.store.SearchSemantic(ctx, "", vec, fetchLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	linked := make(map[string]bool, len(n.Links))
+	for _, l := range n.Links {
+		linked[strings.ToLower(l)] = true
+	}
+
+	out := make([]SearchHit, 0, limit)
+	for _, h := range hits {
+		if h.Note.ID == n.ID {
+			continue
+		}
+		if linked[strings.ToLower(h.Note.Title)] || linked[strings.ToLower(h.Note.ID)] {
+			continue
+		}
+		h.Kind = "suggestion"
+		out = append(out, h)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// maxSummarizeBodyRunes bounds how much of a note's body is sent to the
+// completion endpoint. This keeps the prompt inside a small local model's
+// context window and keeps a single request cheap and fast.
+const maxSummarizeBodyRunes = 8000
+
+// Summarize asks the configured Summarizer for a short summary of a note's
+// body. It returns ErrNotConfigured if no completion endpoint is set up, so
+// callers (REST, MCP) can report clearly that this feature is optional and
+// currently unavailable, rather than a generic failure.
+func (e *Engine) Summarize(ctx context.Context, id string) (string, error) {
+	if err := validateID(id); err != nil {
+		return "", err
+	}
+	if e.summarizer == nil || !e.summarizer.Configured() {
+		return "", ErrNotConfigured
+	}
+	n, err := e.store.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if n == nil {
+		return "", notFoundf("note %q not found", id)
+	}
+	body := n.Body
+	if r := []rune(body); len(r) > maxSummarizeBodyRunes {
+		body = string(r[:maxSummarizeBodyRunes])
+	}
+	prompt := "Summarize the following note in 2-3 sentences. Be factual and concise; " +
+		"do not add information that is not in the note.\n\nTitle: " + n.Title + "\n\n" + body
+	summary, err := e.summarizer.Complete(ctx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("summarize: %w", err)
+	}
+	return summary, nil
+}
+
+// Reembed rebuilds vectors. When full is false (the default, cheap mode), it
+// only backfills notes with no vector yet (e.g. written while the embedder
+// was down) via the store's MissingVectorIDs. When full is true, it rebuilds
+// every note's vector unconditionally, e.g. after an embedding-model change.
+// Returns the number re-embedded.
+func (e *Engine) Reembed(ctx context.Context, full bool) (int, error) {
+	if full {
+		return e.reembedAll(ctx)
+	}
+	return e.reembedMissing(ctx)
+}
+
+func (e *Engine) reembedAll(ctx context.Context) (int, error) {
 	var n int
 	offset := 0
 	for {
@@ -181,14 +402,7 @@ func (e *Engine) Reembed(ctx context.Context) (int, error) {
 			break
 		}
 		for _, note := range batch {
-			v, err := e.embedder.Embed(ctx, embedText(note.Title, note.Body))
-			if err != nil {
-				return n, fmt.Errorf("reembed %q: %w", note.ID, err)
-			}
-			note.Vector = v
-			note.Links = parseLinks(note.Body)
-			note.ContentHash = hashBody(note.Body)
-			if err := e.store.Upsert(ctx, note); err != nil {
+			if err := e.reembedOne(ctx, note); err != nil {
 				return n, err
 			}
 			n++
@@ -196,6 +410,39 @@ func (e *Engine) Reembed(ctx context.Context) (int, error) {
 		offset += len(batch)
 	}
 	return n, nil
+}
+
+func (e *Engine) reembedMissing(ctx context.Context) (int, error) {
+	ids, err := e.store.MissingVectorIDs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var n int
+	for _, id := range ids {
+		note, err := e.store.Get(ctx, id)
+		if err != nil {
+			return n, err
+		}
+		if note == nil {
+			continue
+		}
+		if err := e.reembedOne(ctx, *note); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+func (e *Engine) reembedOne(ctx context.Context, note Note) error {
+	v, err := e.embedder.Embed(ctx, embedText(note.Title, note.Body))
+	if err != nil {
+		return fmt.Errorf("reembed %q: %w", note.ID, err)
+	}
+	note.Vector = v
+	note.Links = parseLinks(note.Body)
+	note.ContentHash = hashBody(note.Body)
+	return e.store.Upsert(ctx, note)
 }
 
 // --- helpers ----------------------------------------------------------------

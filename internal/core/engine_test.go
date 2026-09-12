@@ -43,6 +43,15 @@ func (m *memStore) List(_ context.Context, _ string, limit, offset int) ([]core.
 	return out, nil
 }
 func (m *memStore) Count(_ context.Context) (int, error) { return len(m.notes), nil }
+func (m *memStore) MissingVectorIDs(_ context.Context) ([]string, error) {
+	var ids []string
+	for id, n := range m.notes {
+		if len(n.Vector) == 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
 func (m *memStore) SearchSemantic(_ context.Context, _ string, q []float32, limit int) ([]core.SearchHit, error) {
 	var hits []core.SearchHit
 	for _, n := range m.notes {
@@ -84,6 +93,20 @@ func (m *memStore) Backlinks(_ context.Context, idOrTitle string) ([]core.Backli
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Title < out[j].Title })
 	return out, nil
+}
+func (m *memStore) Stats(_ context.Context) (core.Stats, error) {
+	st := core.Stats{TotalNotes: len(m.notes), NotesByProject: map[string]int{}}
+	for _, n := range m.notes {
+		if n.Project != "" {
+			st.NotesByProject[n.Project]++
+		}
+		if len(n.Vector) == 0 {
+			st.NotesMissingVector++
+		}
+		st.TotalLinks += len(n.Links)
+	}
+	st.TotalProjects = len(st.NotesByProject)
+	return st, nil
 }
 func (m *memStore) Close() error { return nil }
 
@@ -177,6 +200,38 @@ func TestKeywordSearch(t *testing.T) {
 	}
 }
 
+func TestHybridSearchFusesBothSignals(t *testing.T) {
+	e := newEngine(t)
+	ctx := context.Background()
+	// This note should rank well on both semantic (shares vocabulary with the
+	// query) and keyword (contains the literal term) sides.
+	_, err := e.Write(ctx, core.WriteInput{Title: "Postgres backups", Body: "pg_dump and WAL archiving for postgres backups"})
+	if err != nil {
+		t.Fatalf("failed to write note: %v", err)
+	}
+	// This note only matches on the literal keyword "podman", not semantically
+	// close to the query.
+	_, err = e.Write(ctx, core.WriteInput{Title: "Docker notes", Body: "podman play kube is handy"})
+	if err != nil {
+		t.Fatalf("failed to write note: %v", err)
+	}
+	_, _ = e.Write(ctx, core.WriteInput{Title: "Cat facts", Body: "cats sleep a lot and purr"})
+
+	hits, err := e.Search(ctx, "", "postgres backup strategy", 5, "hybrid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected hybrid hits, got none")
+	}
+	if hits[0].Note.Title != "Postgres backups" {
+		t.Fatalf("expected postgres note ranked first, got %+v", hits)
+	}
+	if hits[0].Kind != "hybrid" {
+		t.Fatalf("expected kind=hybrid, got %q", hits[0].Kind)
+	}
+}
+
 func TestPatch(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()
@@ -194,6 +249,113 @@ func TestPatch(t *testing.T) {
 	}
 	if _, err := e.Patch(ctx, "config", "nope", "x"); err == nil {
 		t.Fatal("expected not-found error")
+	}
+}
+
+func TestSuggestLinks(t *testing.T) {
+	e := newEngine(t)
+	ctx := context.Background()
+	_, err := e.Write(ctx, core.WriteInput{Title: "Postgres backups", Body: "pg_dump and WAL archiving for postgres backups"})
+	if err != nil {
+		t.Fatalf("failed to write note: %v", err)
+	}
+	_, err = e.Write(ctx, core.WriteInput{Title: "Postgres tuning", Body: "pg_dump and WAL archiving tips for postgres performance"})
+	if err != nil {
+		t.Fatalf("failed to write note: %v", err)
+	}
+	_, err = e.Write(ctx, core.WriteInput{Title: "Cat facts", Body: "cats sleep a lot and purr"})
+	if err != nil {
+		t.Fatalf("failed to write note: %v", err)
+	}
+
+	hits, err := e.SuggestLinks(ctx, "postgres-backups", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected at least one suggestion")
+	}
+	for _, h := range hits {
+		if h.Note.ID == "postgres-backups" {
+			t.Fatal("suggestions must not include the note itself")
+		}
+		if h.Kind != "suggestion" {
+			t.Fatalf("expected kind=suggestion, got %q", h.Kind)
+		}
+	}
+	if hits[0].Note.Title != "Postgres tuning" {
+		t.Fatalf("expected the related postgres note ranked first, got %+v", hits)
+	}
+
+	// Once linked, the target note must no longer be suggested.
+	_, err = e.Write(ctx, core.WriteInput{ID: "postgres-backups", Title: "Postgres backups",
+		Body: "pg_dump and WAL archiving for postgres backups, see also [[Postgres tuning]]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits, err = e.SuggestLinks(ctx, "postgres-backups", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range hits {
+		if h.Note.Title == "Postgres tuning" {
+			t.Fatalf("already-linked note must not be suggested again: %+v", hits)
+		}
+	}
+
+	if _, err := e.SuggestLinks(ctx, "does-not-exist", 5); !core.IsNotFound(err) {
+		t.Fatalf("expected not-found error, got %v", err)
+	}
+}
+
+func TestReembedMissingOnlyBackfillsUnvectoredNotes(t *testing.T) {
+	m := newMem()
+	e := core.NewEngine(m, fakeEmbedder{})
+	ctx := context.Background()
+
+	if _, err := e.Write(ctx, core.WriteInput{Title: "Has Vector", Body: "already embedded"}); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a note written while the embedder was down: present but with
+	// no vector.
+	m.notes["no-vector"] = core.Note{ID: "no-vector", Title: "No Vector", Body: "needs embedding"}
+
+	n, err := e.Reembed(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 note backfilled, got %d", n)
+	}
+	got := m.notes["no-vector"]
+	if len(got.Vector) == 0 {
+		t.Fatal("expected vector to be backfilled")
+	}
+
+	missing, err := m.MissingVectorIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("expected no notes missing a vector, got %v", missing)
+	}
+}
+
+func TestReembedFullRebuildsEveryVector(t *testing.T) {
+	e := newEngine(t)
+	ctx := context.Background()
+	if _, err := e.Write(ctx, core.WriteInput{Title: "One", Body: "first note"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Write(ctx, core.WriteInput{Title: "Two", Body: "second note"}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := e.Reembed(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 notes reembedded, got %d", n)
 	}
 }
 
