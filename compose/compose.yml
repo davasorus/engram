@@ -89,6 +89,10 @@ services:
       ENGRAM_EMBED_URL: "${ENGRAM_EMBED_URL:-http://localhost:1234}"
       ENGRAM_EMBED_MODEL: "${ENGRAM_EMBED_MODEL:-text-embedding-nomic-embed-text-v1.5}"
       ENGRAM_MCP_TOOLS: "${ENGRAM_MCP_TOOLS:-}"
+      ENGRAM_DB_MAX_CONNS: "${ENGRAM_DB_MAX_CONNS:-}"
+      ENGRAM_DB_MIN_CONNS: "${ENGRAM_DB_MIN_CONNS:-}"
+      ENGRAM_DB_CONN_MAX_LIFETIME: "${ENGRAM_DB_CONN_MAX_LIFETIME:-}"
+      ENGRAM_DB_CONN_MAX_IDLE_TIME: "${ENGRAM_DB_CONN_MAX_IDLE_TIME:-}"
     healthcheck:
       test: ["CMD", "/engram", "-healthcheck", "-addr", ":${ENGRAM_PORT:-8088}"]
       interval: 30s

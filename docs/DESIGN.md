@@ -49,6 +49,13 @@ start order does not matter. Because storage sits behind the interface, a
 future release could add an embedded or alternative backend without
 changing anything above it.
 
+The connection pool (`pgxpool`) uses its own defaults out of the box. Four
+optional settings tune it for busier deployments: `ENGRAM_DB_MAX_CONNS`,
+`ENGRAM_DB_MIN_CONNS`, `ENGRAM_DB_CONN_MAX_LIFETIME`, and
+`ENGRAM_DB_CONN_MAX_IDLE_TIME`. Set these when you see connection
+exhaustion, or want to keep a minimum pool warm. Leave them unset to keep
+pgxpool's own defaults.
+
 An earlier iteration used embedded SQLite for a single-file artifact. The
 project moved to Postgres and pgvector for mature, indexed vector search
 and a clean path to managed cloud databases. This trade accepts a
