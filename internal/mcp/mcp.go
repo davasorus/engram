@@ -68,7 +68,7 @@ type searchIn struct {
 	Query   string `json:"query" jsonschema:"the natural-language search query"`
 	Project string `json:"project,omitempty" jsonschema:"restrict to this project scope (optional; omit to search all)"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"max results (default 10)"`
-	Kind    string `json:"kind,omitempty" jsonschema:"'semantic' (default) or 'keyword'"`
+	Kind    string `json:"kind,omitempty" jsonschema:"'semantic' (default), 'keyword', or 'hybrid' (combines both)"`
 }
 type readIn struct {
 	ID string `json:"id" jsonschema:"the note id"`
@@ -101,7 +101,7 @@ func (a *Adapter) registerTools() {
 	if a.enabled("mem_search") {
 		mcp.AddTool(a.server, &mcp.Tool{
 			Name:        "mem_search",
-			Description: "Search the agent's memory by meaning (semantic) or keyword. Returns ranked notes with scores.",
+			Description: "Search the agent's memory by meaning (semantic), by keyword, or with hybrid rank fusion of both. Returns ranked notes with scores.",
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
 			hits, err := a.eng.Search(ctx, in.Project, in.Query, in.Limit, in.Kind)
 			if err != nil {

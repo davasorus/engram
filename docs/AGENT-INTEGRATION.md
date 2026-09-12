@@ -1,59 +1,65 @@
 # Wiring engram into the Go agent
 
-The rollout order, the decisions already made, and the exact config/prompt
-blocks to drop into the agent. Do these in order — each step proves a layer
-so later failures can only be in the newest layer.
+This document gives the rollout order, the decisions already made, and the
+exact config and prompt blocks to add to the agent. Do these steps in
+order. Each step proves one layer, so a later failure can only come from
+the newest layer.
 
 ## 0. Prerequisites (once)
 
-- LM Studio (Windows) has `text-embedding-nomic-embed-text-v1.5` downloaded.
-  JIT model loading is fine; the first embed call loads it. 768 dims — matches
-  `ENGRAM_DIMS` default.
-- Dependabot alerts + security updates enabled in the GitHub repo settings.
+- LM Studio (Windows) has the model `text-embedding-nomic-embed-text-v1.5`
+  downloaded. JIT model loading works; the first embed call loads the
+  model. The model has 768 dimensions, which matches the `ENGRAM_DIMS`
+  default.
+- Enable Dependabot alerts and security updates in the GitHub repository
+  settings.
 
 ## 1. Deploy on Lazerus
 
 ```bash
 cp compose/.env.example compose/.env
-# Set the embed URL to the Windows-host gateway + portproxy port:
+# Set the embed URL to the Windows-host gateway and port-proxy port:
 sed -i '/^ENGRAM_EMBED_URL=/d' compose/.env
 echo "ENGRAM_EMBED_URL=http://$(ip route show default | awk '{print $3}'):1235" >> compose/.env
 podman-compose -f compose/compose.yml up -d   # pulls ghcr.io/davasorus/engram:${ENGRAM_VERSION}
 ```
 
-The default `.env.example` sets `ENGRAM_MCP_TOOLS=mem_search,mem_read,mem_write`
-— the reduced surface intended for the agent.
+The default `.env.example` sets `ENGRAM_MCP_TOOLS=mem_search,mem_read,mem_write`.
+This is the reduced tool surface intended for the agent.
 
-## 2. Smoke test (before the agent touches it)
+## 2. Run the smoke test (before the agent uses engram)
 
 ```bash
 ENGRAM_URL=http://localhost:8088 ./scripts/smoke.sh
 ```
 
-All steps must PASS, including `embedder reachable`. Then the persistence
-check: `podman-compose -f compose/compose.yml restart` and re-run the smoke —
-note counts survive because state lives in the `pgdata` volume.
+All steps must report PASS, including `embedder reachable`. Then check
+persistence: run `podman-compose -f compose/compose.yml restart` and run
+the smoke test again. Note counts must survive, because state lives in the
+`pgdata` volume.
 
-## 3. Degraded mode (know it, don't fear it)
+## 3. Degraded mode
 
-engram stays useful when LM Studio is down:
+engram stays useful when LM Studio is down.
 
-- **Writes succeed** without a vector (logged; note is keyword-searchable).
-- **Semantic search falls back** to keyword automatically.
-- `GET /api/health` reports `missing_vectors`; `GET /api/health?probe=1`
-  additionally tests the embedder.
-- `POST /api/reembed` backfills missing vectors once LM Studio is back
-  (`?all=1` re-embeds everything — only needed after changing embed models).
+- **Writes succeed** without a vector. The system logs this and the note
+  stays keyword-searchable.
+- **Semantic search falls back** to keyword search automatically.
+- `GET /api/health` reports `missing_vectors`. `GET /api/health?probe=1`
+  also tests the embedder.
+- `POST /api/reembed` backfills missing vectors once LM Studio comes back.
+  Add `?all=1` to re-embed every note; use this only after you change the
+  embedding model.
 
-Practical habit: when LM Studio comes back up, `curl -X POST
+Practical habit: when LM Studio comes back up, run `curl -X POST
 http://localhost:8088/api/reembed`.
 
-## 4. Agent config (`~/.agent/config.json`)
+## 4. Configure the agent (`~/.agent/config.json`)
 
-Streamable HTTP, not stdio — engram is a long-lived shared service (memory
-persists across agent sessions; the web UI and REST share the same store),
-not a per-session subprocess. Add to the MCP servers section (adapt field
-names to the agent's schema):
+Use streamable HTTP, not stdio. engram runs as a long-lived shared service:
+memory persists across agent sessions, and the web UI and REST share the
+same store. It is not a per-session subprocess. Add this block to the MCP
+servers section. Adapt the field names to match the agent's schema.
 
 ```json
 {
@@ -74,13 +80,14 @@ With the allowlist above, the agent sees exactly three tools:
 | `mem_read`   | fetch full note body by id                 |
 | `mem_write`  | create/update a note (upsert by slug id)   |
 
-`mem_patch`, `mem_list`, `mem_links`, `mem_delete` stay reachable via REST
-and the web UI — they're human/maintenance operations, and Gemma-12B-class
-models call tools more reliably with fewer to choose from.
+`mem_patch`, `mem_list`, `mem_links`, and `mem_delete` stay reachable
+through REST and the web UI. These are human and maintenance operations.
+Smaller models, such as Gemma-12B-class models, call tools more reliably
+when they have fewer tools to choose from.
 
-## 5. System prompt addition (agent side)
+## 5. Add a system prompt block (agent side)
 
-Conventions matter more than plumbing. Suggested block:
+Conventions matter more than plumbing. Use this block as a starting point:
 
 ```
 MEMORY (engram tools):
@@ -96,19 +103,22 @@ MEMORY (engram tools):
 - Use [[wikilinks]] in bodies to connect related notes.
 ```
 
-The `source:agent` tag is the cleanup lever: it keeps agent-written notes
-distinguishable from human-written ones forever, and it's much cheaper to
-adopt now than to migrate in later.
+The `source:agent` tag is the cleanup lever. It keeps agent-written notes
+distinguishable from human-written notes at all times. Adopting this tag
+now costs much less than migrating tags later.
 
-## 6. Verify end-to-end
+## 6. Verify the setup end to end
 
-Give the agent a task like: "Search your memory for notes about Liquibase.
-If nothing is found, write a note titled 'Engram integration test' tagged
-source:agent." Then confirm in the web UI (http://localhost:8088) that the
-note exists with the tag, and `mem_search` finds it in a fresh session.
+Give the agent a task such as: "Search your memory for notes about
+Liquibase. If nothing is found, write a note titled 'Engram integration
+test' tagged source:agent." Then confirm in the web UI
+(http://localhost:8088) that the note exists with the tag. Run
+`mem_search` again in a fresh session to confirm it finds the note.
 
 ## Security posture
 
-No auth on REST/MCP by design (single-user homelab). Keep the port bound to
-localhost/LAN; do not forward 8088 through anything public. If that changes,
-auth goes in front (reverse proxy) before exposure.
+REST and MCP have no authentication by design; this fits a single-user
+homelab. Keep the port bound to localhost or the LAN. Do not forward port
+8088 through anything public. If that requirement changes, add auth in
+front of engram, for example through a reverse proxy, before you expose
+the service.

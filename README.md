@@ -2,29 +2,32 @@
 
 ![ci](https://github.com/davasorus/engram/actions/workflows/ci.yml/badge.svg)
 
-A containerized **memory service for an AI agent** — a brain, not an Obsidian
-clone. It stores markdown notes *as data* (Postgres, not files), indexes them
-for **semantic search** (pgvector) and **link/structure** queries, and exposes
-everything over **MCP** (for the agent) and a **REST API + web UI** (for humans
-and scripts) — from a single Go service that runs alongside its database as a
-declared container stack.
+engram is a containerized memory service for an AI agent. It is a brain, not
+an Obsidian clone. It stores markdown notes as data in Postgres, not as
+files. It indexes notes for semantic search with pgvector. It indexes notes
+for link and structure queries. It exposes all functions over MCP for the
+agent. It exposes all functions over a REST API and a web UI for humans and
+scripts. A single Go service runs these functions alongside its database as
+a declared container stack.
 
-## Why it's shaped this way
+## Why the system has this shape
 
-The agent's memory used to depend on a chain of fragile pieces (a note-taking
-desktop app, a plugin HTTP server, TLS, an OS filesystem bridge). engram
-replaces that with a normal service + database:
+The agent's memory used to depend on a chain of fragile parts: a note-taking
+desktop app, a plugin HTTP server, TLS, and an OS filesystem bridge. engram
+replaces that chain with a normal service and a database.
 
 - **Notes are records, not files.** A note's markdown body is a column. This
-  unifies the three layers — markdown content, structured metadata/links, and
-  vectors — into one store with one write path. No shared filesystem between
-  host and container, so there's nothing to coordinate or corrupt.
-- **Real vector search.** Embeddings live in Postgres via **pgvector**, with an
-  HNSW index; KNN runs in SQL and scales past brute force.
-- **One service, two interfaces.** MCP and REST are thin adapters over one core
-  engine, so they can't drift apart.
-- **Declared stack.** engram + Postgres are both containers in compose/kube —
-  reproducible, and hostable locally (Podman) or on managed cloud Postgres.
+  design unifies three layers — markdown content, structured metadata and
+  links, and vectors — into one store with one write path. No filesystem is
+  shared between host and container. There is nothing to coordinate or
+  corrupt.
+- **Real vector search.** Embeddings live in Postgres through pgvector, with
+  an HNSW index. KNN search runs in SQL and scales past brute force.
+- **One service, two interfaces.** MCP and REST are thin adapters over one
+  core engine. The two interfaces cannot drift apart.
+- **Declared stack.** engram and Postgres are both containers in compose and
+  kube files. The stack is reproducible. You can host it locally with Podman
+  or on a managed cloud Postgres instance.
 
 ## Architecture
 
@@ -40,11 +43,12 @@ replaces that with a normal service + database:
                        └──────────────────┘
 ```
 
-## Storage: Postgres + pgvector, behind a `Store` interface
+## Storage: Postgres and pgvector, behind a Store interface
 
-The core depends on `core.Store`, not on Postgres directly (`internal/store`
-holds the pgvector implementation). Vectors are a `vector(N)` column with an
-HNSW cosine index; keyword search uses a GIN full-text index as a fallback.
+The core depends on the `core.Store` interface, not on Postgres directly.
+`internal/store` holds the pgvector implementation. Vectors use a
+`vector(N)` column with an HNSW cosine index. Keyword search uses a GIN
+full-text index as a fallback.
 
 ## Quick start (compose)
 
@@ -52,14 +56,14 @@ HNSW cosine index; keyword search uses a GIN full-text index as a fallback.
 cd compose && cp .env.example .env   # set POSTGRES_PASSWORD, ENGRAM_DIMS, ENGRAM_EMBED_URL, ENGRAM_VERSION
 podman-compose -f compose.yml up -d  # pulls engram + engram-migrate from GHCR
 
-# Developing engram itself? Build from source with the overlay:
+# To develop engram itself, build from source with the overlay:
 #   podman-compose -f compose.yml -f Compose.dev.yml up -d --build
 # UI:   http://localhost:8088/
 # MCP:  http://localhost:8088/mcp/
 # REST: http://localhost:8088/api/
 ```
 
-`ENGRAM_DIMS` **must** match your embedding model's output width
+`ENGRAM_DIMS` must match the output width of your embedding model
 (nomic-embed-text-v1.5 = 768).
 
 ## Quick start (Kubernetes-shaped)
@@ -69,26 +73,27 @@ podman play kube kube/engram.yaml       # runs on Podman
 # or: kubectl apply -f kube/engram.yaml  # on a real cluster
 ```
 
-## Pointing the agent at it
+## Pointing the agent at engram
 
 Configure the agent's MCP client with an HTTP server at
-`http://<host>:8088/mcp/`. Tools exposed: `mem_search`, `mem_read`,
-`mem_write`, `mem_patch`, `mem_links`, `mem_list`, `mem_delete`.
+`http://<host>:8088/mcp/`. engram exposes these tools: `mem_search`,
+`mem_read`, `mem_write`, `mem_patch`, `mem_links`, `mem_list`, `mem_delete`.
 
 ## Interfaces
 
-- **MCP** — `POST /mcp/` (streamable HTTP), or run `engram -stdio` for a
+- **MCP** — `POST /mcp/` for streamable HTTP. Run `engram -stdio` for a
   subprocess transport.
-- **REST** — `GET /api/search?q=&kind=`, `GET|POST /api/notes`,
+- **REST** — `GET /api/search?q=&kind=semantic|keyword|hybrid`, `GET|POST /api/notes`,
   `GET|PATCH|DELETE /api/notes/{id}`, `GET /api/notes/{id}/links`,
   `POST /api/reembed`, `GET /api/health`.
-- **Web UI** — browse, view (rendered markdown: GFM, callouts, mermaid, KaTeX),
-  semantic/keyword search, and a live-preview editor with wikilink autocomplete.
+- **Web UI** — browse notes, view rendered markdown (GFM, callouts, mermaid,
+  KaTeX), run semantic, keyword, or hybrid search, and edit notes with a
+  live-preview editor and wikilink autocomplete.
 
 ## Dependencies
 
-- `jackc/pgx` + `pgvector/pgvector-go` — Postgres driver and vector types.
-- `yuin/goldmark` (+ GFM) — markdown rendering.
+- `jackc/pgx` and `pgvector/pgvector-go` — Postgres driver and vector types.
+- `yuin/goldmark` with GFM — markdown rendering.
 - `modelcontextprotocol/go-sdk` — MCP server.
 - stdlib `net/http` (1.22 method-pattern mux) — routing.
 
@@ -102,18 +107,19 @@ Configure the agent's MCP client with an HTTP server at
 | `internal/embed` | OpenAI-compatible embeddings client |
 | `internal/mcp` | MCP adapter |
 | `internal/rest` | REST adapter |
-| `internal/web` | web UI + markdown rendering |
+| `internal/web` | web UI and markdown rendering |
 | `compose/`, `kube/` | the declared container stack |
 
 ## Notes
 
-- Changing embedding models with a different width requires migrating the
-  `vector(N)` column and re-embedding (`POST /api/reembed`).
-- The `pgdata` volume is the backup unit — the whole vault lives there.
+- If you change the embedding model to a different width, you must migrate
+  the `vector(N)` column and re-embed all notes (`POST /api/reembed`).
+- The `pgdata` volume is the backup unit. The whole vault lives there.
 
-## AI Usage
+## AI usage
 
-- This was created using a combination of Online Claude Code and offline [gemma-4-12B](https://huggingface.co/google/gemma-4-12B)
+This project was created with a combination of online Claude Code and
+offline [gemma-4-12B](https://huggingface.co/google/gemma-4-12B).
 
 ## Development
 
@@ -124,18 +130,21 @@ golangci-lint run                               # lint
 gofmt -l .                                      # format check
 ```
 
-CI (`.github/workflows/ci.yml`) runs build, vet, golangci-lint, gofmt check, unit
-tests, and the pgvector integration tests on every push/PR.
+The CI workflow (`.github/workflows/ci.yml`) runs the build, vet,
+golangci-lint, the gofmt check, unit tests, and the pgvector integration
+tests on every push and pull request.
 
 ## Releases
 
-Pushing a semver tag builds and publishes via `.github/workflows/release.yml`:
-multi-arch binaries + a GitHub Release (GoReleaser), and **two** multi-arch
-container images to **GHCR**, tagged `X.Y.Z` (no leading `v`) and `latest`:
+A pushed semver tag triggers `.github/workflows/release.yml`. This workflow
+builds and publishes multi-arch binaries and a GitHub release through
+GoReleaser. It also builds and publishes two multi-arch container images to
+GHCR, tagged `X.Y.Z` (no leading `v`) and `latest`:
 
 - `ghcr.io/davasorus/engram` — the service.
-- `ghcr.io/davasorus/engram-migrate` — Liquibase + the schema changelog, run
-  before engram to apply migrations (see [docs/MIGRATIONS.md](docs/MIGRATIONS.md)).
+- `ghcr.io/davasorus/engram-migrate` — Liquibase and the schema changelog.
+  Run this image before engram to apply migrations. See
+  [docs/MIGRATIONS.md](docs/MIGRATIONS.md).
 
 ```bash
 git tag v0.4.0 && git push origin v0.4.0

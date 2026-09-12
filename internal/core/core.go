@@ -23,15 +23,15 @@ type Note struct {
 	ContentHash string         `json:"content_hash,omitempty"`
 	Created     time.Time      `json:"created"`
 	Updated     time.Time      `json:"updated"`
-	// Vector is not serialized to JSON by default; it's an internal index.
+	// Vector is not serialized to JSON by default; it is an internal index.
 	Vector []float32 `json:"-"`
 }
 
 // SearchHit is a note plus its relevance to a query.
 type SearchHit struct {
 	Note  Note    `json:"note"`
-	Score float64 `json:"score"` // cosine similarity (semantic) or 1.0 (keyword)
-	Kind  string  `json:"kind"`  // "semantic" | "keyword"
+	Score float64 `json:"score"` // cosine similarity (semantic), 1.0 (keyword), or an RRF rank-fusion score (hybrid)
+	Kind  string  `json:"kind"`  // "semantic" | "keyword" | "hybrid"
 }
 
 // Backlink is a note that links TO the note being inspected.

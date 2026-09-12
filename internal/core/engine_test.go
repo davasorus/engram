@@ -177,6 +177,38 @@ func TestKeywordSearch(t *testing.T) {
 	}
 }
 
+func TestHybridSearchFusesBothSignals(t *testing.T) {
+	e := newEngine(t)
+	ctx := context.Background()
+	// This note should rank well on both semantic (shares vocabulary with the
+	// query) and keyword (contains the literal term) sides.
+	_, err := e.Write(ctx, core.WriteInput{Title: "Postgres backups", Body: "pg_dump and WAL archiving for postgres backups"})
+	if err != nil {
+		t.Fatalf("failed to write note: %v", err)
+	}
+	// This note only matches on the literal keyword "podman", not semantically
+	// close to the query.
+	_, err = e.Write(ctx, core.WriteInput{Title: "Docker notes", Body: "podman play kube is handy"})
+	if err != nil {
+		t.Fatalf("failed to write note: %v", err)
+	}
+	_, _ = e.Write(ctx, core.WriteInput{Title: "Cat facts", Body: "cats sleep a lot and purr"})
+
+	hits, err := e.Search(ctx, "", "postgres backup strategy", 5, "hybrid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected hybrid hits, got none")
+	}
+	if hits[0].Note.Title != "Postgres backups" {
+		t.Fatalf("expected postgres note ranked first, got %+v", hits)
+	}
+	if hits[0].Kind != "hybrid" {
+		t.Fatalf("expected kind=hybrid, got %q", hits[0].Kind)
+	}
+}
+
 func TestPatch(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()

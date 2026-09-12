@@ -151,10 +151,70 @@ func TestSearchEndpoint(t *testing.T) {
 	}
 }
 
+// TestSearchHybridEndpoint confirms kind=hybrid is accepted end-to-end and
+// returns fused hits tagged with kind "hybrid".
+func TestSearchHybridEndpoint(t *testing.T) {
+	api := newAPI()
+	req := httptest.NewRequest("POST", "/api/notes", strings.NewReader(`{"title":"Doc","body":"podman notes"}`))
+	req.Header.Set("Content-Type", "application/json")
+	api.ServeHTTP(httptest.NewRecorder(), req)
+
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, httptest.NewRequest("GET", "/api/search?q=podman&kind=hybrid", nil))
+	if rec.Code != 200 {
+		t.Fatalf("search status %d: %s", rec.Code, rec.Body.String())
+	}
+	var hits []core.SearchHit
+	if err := json.Unmarshal(rec.Body.Bytes(), &hits); err != nil {
+		t.Fatalf("failed to unmarshal hits: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected at least one hybrid hit")
+	}
+	if hits[0].Kind != "hybrid" {
+		t.Fatalf("expected kind=hybrid, got %q", hits[0].Kind)
+	}
+}
+
 func TestSearchMissingQuery(t *testing.T) {
 	rec := httptest.NewRecorder()
 	newAPI().ServeHTTP(rec, httptest.NewRequest("GET", "/api/search", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+// TestGetInvalidID400 confirms an invalid id (e.g. path traversal) is a
+// client error, not a 500: writeEngErr must map core.ErrInvalidInput to 400.
+func TestGetInvalidID400(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newAPI().ServeHTTP(rec, httptest.NewRequest("GET", "/api/notes/..%2Fetc%2Fpasswd", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPatchMissingNote404 confirms a patch against a note that does not
+// exist reports 404 (core.ErrNotFound), not 400 or 500.
+func TestPatchMissingNote404(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PATCH", "/api/notes/nope", strings.NewReader(`{"old_str":"a","new_str":"b"}`))
+	req.Header.Set("Content-Type", "application/json")
+	newAPI().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestWriteBodyTooLarge confirms an oversized request body is rejected
+// before it reaches JSON decoding or the engine.
+func TestWriteBodyTooLarge(t *testing.T) {
+	huge := strings.Repeat("a", 5*1024*1024)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/notes", strings.NewReader(`{"title":"t","body":"`+huge+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	newAPI().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
