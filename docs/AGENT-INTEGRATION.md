@@ -80,8 +80,9 @@ With the allowlist above, the agent sees exactly three tools:
 | `mem_read`   | fetch full note body by id                 |
 | `mem_write`  | create/update a note (upsert by slug id)   |
 
-`mem_patch`, `mem_list`, `mem_links`, and `mem_delete` stay reachable
-through REST and the web UI. These are human and maintenance operations.
+`mem_patch`, `mem_list`, `mem_links`, `mem_delete`, and
+`mem_suggest_links` stay reachable through REST and the web UI. These are
+human and maintenance operations.
 Smaller models, such as Gemma-12B-class models, call tools more reliably
 when they have fewer tools to choose from.
 

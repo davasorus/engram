@@ -176,6 +176,42 @@ func TestSearchHybridEndpoint(t *testing.T) {
 	}
 }
 
+// TestSuggestionsEndpoint confirms GET /api/notes/{id}/suggestions returns
+// hits tagged "suggestion" and rejects a missing note with 404.
+func TestSuggestionsEndpoint(t *testing.T) {
+	api := newAPI()
+	for _, body := range []string{
+		`{"title":"Postgres backups","body":"pg_dump and WAL archiving"}`,
+		`{"title":"Postgres tuning","body":"pg_dump and WAL archiving tips"}`,
+	} {
+		req := httptest.NewRequest("POST", "/api/notes", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		api.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, httptest.NewRequest("GET", "/api/notes/postgres-backups/suggestions", nil))
+	if rec.Code != 200 {
+		t.Fatalf("suggestions status %d: %s", rec.Code, rec.Body.String())
+	}
+	var hits []core.SearchHit
+	if err := json.Unmarshal(rec.Body.Bytes(), &hits); err != nil {
+		t.Fatalf("failed to unmarshal hits: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected at least one suggestion")
+	}
+	if hits[0].Kind != "suggestion" {
+		t.Fatalf("expected kind=suggestion, got %q", hits[0].Kind)
+	}
+
+	rec = httptest.NewRecorder()
+	api.ServeHTTP(rec, httptest.NewRequest("GET", "/api/notes/nope/suggestions", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestSearchMissingQuery(t *testing.T) {
 	rec := httptest.NewRecorder()
 	newAPI().ServeHTTP(rec, httptest.NewRequest("GET", "/api/search", nil))

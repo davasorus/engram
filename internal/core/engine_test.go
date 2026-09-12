@@ -229,6 +229,62 @@ func TestPatch(t *testing.T) {
 	}
 }
 
+func TestSuggestLinks(t *testing.T) {
+	e := newEngine(t)
+	ctx := context.Background()
+	_, err := e.Write(ctx, core.WriteInput{Title: "Postgres backups", Body: "pg_dump and WAL archiving for postgres backups"})
+	if err != nil {
+		t.Fatalf("failed to write note: %v", err)
+	}
+	_, err = e.Write(ctx, core.WriteInput{Title: "Postgres tuning", Body: "pg_dump and WAL archiving tips for postgres performance"})
+	if err != nil {
+		t.Fatalf("failed to write note: %v", err)
+	}
+	_, err = e.Write(ctx, core.WriteInput{Title: "Cat facts", Body: "cats sleep a lot and purr"})
+	if err != nil {
+		t.Fatalf("failed to write note: %v", err)
+	}
+
+	hits, err := e.SuggestLinks(ctx, "postgres-backups", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected at least one suggestion")
+	}
+	for _, h := range hits {
+		if h.Note.ID == "postgres-backups" {
+			t.Fatal("suggestions must not include the note itself")
+		}
+		if h.Kind != "suggestion" {
+			t.Fatalf("expected kind=suggestion, got %q", h.Kind)
+		}
+	}
+	if hits[0].Note.Title != "Postgres tuning" {
+		t.Fatalf("expected the related postgres note ranked first, got %+v", hits)
+	}
+
+	// Once linked, the target note must no longer be suggested.
+	_, err = e.Write(ctx, core.WriteInput{ID: "postgres-backups", Title: "Postgres backups",
+		Body: "pg_dump and WAL archiving for postgres backups, see also [[Postgres tuning]]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits, err = e.SuggestLinks(ctx, "postgres-backups", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range hits {
+		if h.Note.Title == "Postgres tuning" {
+			t.Fatalf("already-linked note must not be suggested again: %+v", hits)
+		}
+	}
+
+	if _, err := e.SuggestLinks(ctx, "does-not-exist", 5); !core.IsNotFound(err) {
+		t.Fatalf("expected not-found error, got %v", err)
+	}
+}
+
 func TestBacklinks(t *testing.T) {
 	e := newEngine(t)
 	ctx := context.Background()

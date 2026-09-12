@@ -88,6 +88,10 @@ type patchIn struct {
 type linksIn struct {
 	ID string `json:"id" jsonschema:"note id or title to find backlinks for"`
 }
+type suggestIn struct {
+	ID    string `json:"id" jsonschema:"note id to find cross-link suggestions for"`
+	Limit int    `json:"limit,omitempty" jsonschema:"max suggestions (default 10)"`
+}
 type listIn struct {
 	Project string `json:"project,omitempty" jsonschema:"restrict to this project scope (optional)"`
 	Limit   int    `json:"limit,omitempty"`
@@ -163,6 +167,19 @@ func (a *Adapter) registerTools() {
 				return errResult(err), nil, nil
 			}
 			return jsonResult(bl), nil, nil
+		})
+	}
+
+	if a.enabled("mem_suggest_links") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_suggest_links",
+			Description: "Suggest notes in memory that are semantically related to a given note but not yet linked from it. Use this after writing a note to find candidates for [[wikilinks]].",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in suggestIn) (*mcp.CallToolResult, any, error) {
+			hits, err := a.eng.SuggestLinks(ctx, in.ID, in.Limit)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(hits), nil, nil
 		})
 	}
 
