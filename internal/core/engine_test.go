@@ -94,6 +94,20 @@ func (m *memStore) Backlinks(_ context.Context, idOrTitle string) ([]core.Backli
 	sort.Slice(out, func(i, j int) bool { return out[i].Title < out[j].Title })
 	return out, nil
 }
+func (m *memStore) Stats(_ context.Context) (core.Stats, error) {
+	st := core.Stats{TotalNotes: len(m.notes), NotesByProject: map[string]int{}}
+	for _, n := range m.notes {
+		if n.Project != "" {
+			st.NotesByProject[n.Project]++
+		}
+		if len(n.Vector) == 0 {
+			st.NotesMissingVector++
+		}
+		st.TotalLinks += len(n.Links)
+	}
+	st.TotalProjects = len(st.NotesByProject)
+	return st, nil
+}
 func (m *memStore) Close() error { return nil }
 
 func cosine(a, b []float32) float64 {

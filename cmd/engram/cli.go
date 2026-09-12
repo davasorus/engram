@@ -29,6 +29,7 @@ var cliCommands = map[string]func(ctx context.Context, out io.Writer, args []str
 	"suggest": cliSuggest,
 	"summary": cliSummary,
 	"reembed": cliReembed,
+	"stats":   cliStats,
 	"help":    cliHelp,
 	"--help":  cliHelp,
 	"-h":      cliHelp,
@@ -293,6 +294,19 @@ func cliReembed(ctx context.Context, out io.Writer, args []string) int {
 	return 0
 }
 
+func cliStats(ctx context.Context, out io.Writer, args []string) int {
+	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
+	server := cliServerFlag(fs)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	st, err := cliclient.New(server()).Stats(ctx)
+	if err != nil {
+		return cliFail(out, err)
+	}
+	return cliPrintJSON(out, st)
+}
+
 const cliHelpText = `engram: memory service for AI agents
 
 Run with no subcommand (or with server flags like -dsn/-addr) to start the
@@ -311,6 +325,7 @@ ENGRAM_CLI_SERVER):
   suggest [-limit N] <id>         suggest related notes to cross-link
   summary <id>                    summarize a note (needs --complete-url)
   reembed [-full]                 backfill missing vectors (-full: rebuild all)
+  stats                           show summary counts (notes, projects, links)
 
 Run "engram <subcommand> -h" for a subcommand's own options.
 `

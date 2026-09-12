@@ -40,6 +40,18 @@ type Backlink struct {
 	Title string `json:"title"`
 }
 
+// Stats summarizes the memory store's current size and health. It backs the
+// REST /api/stats endpoint, the mem_stats MCP tool, the `engram stats` CLI
+// command, and the web UI's stats panel — all four read the same numbers.
+type Stats struct {
+	TotalNotes         int            `json:"total_notes"`
+	TotalProjects      int            `json:"total_projects"`
+	NotesByProject     map[string]int `json:"notes_by_project,omitempty"`
+	TotalLinks         int            `json:"total_links"`
+	NotesMissingVector int            `json:"notes_missing_vector"`
+	UpdatedLast7Days   int            `json:"updated_last_7_days"`
+}
+
 // Store is the persistence contract. The SQLite implementation lives in
 // internal/store; a Postgres one could be added without changing callers.
 //
@@ -81,6 +93,10 @@ type Store interface {
 
 	// Backlinks returns notes whose Links contain the given id/title.
 	Backlinks(ctx context.Context, idOrTitle string) ([]Backlink, error)
+
+	// Stats returns summary counts over the whole store: notes, projects,
+	// links, notes missing a vector, and recent-activity volume.
+	Stats(ctx context.Context) (Stats, error)
 
 	// Close releases resources.
 	Close() error

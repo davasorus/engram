@@ -36,6 +36,7 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/notes/{id}/suggestions", a.suggestions)
 	mux.HandleFunc("GET /api/notes/{id}/summary", a.summary)
 	mux.HandleFunc("POST /api/reembed", a.reembed)
+	mux.HandleFunc("GET /api/stats", a.stats)
 	mux.HandleFunc("GET /api/health", a.health)
 	return mux
 }
@@ -168,6 +169,15 @@ func (a *API) summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"summary": s})
+}
+
+func (a *API) stats(w http.ResponseWriter, r *http.Request) {
+	st, err := a.eng.Stats(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
 func (a *API) reembed(w http.ResponseWriter, r *http.Request) {

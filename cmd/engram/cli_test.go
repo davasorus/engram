@@ -45,6 +45,9 @@ func (m *memStore) MissingVectorIDs(_ context.Context) ([]string, error) {
 	}
 	return ids, nil
 }
+func (m *memStore) Stats(_ context.Context) (core.Stats, error) {
+	return core.Stats{TotalNotes: len(m.notes)}, nil
+}
 func (m *memStore) SearchSemantic(_ context.Context, _ string, _ []float32, _ int) ([]core.SearchHit, error) {
 	var out []core.SearchHit
 	for _, n := range m.notes {

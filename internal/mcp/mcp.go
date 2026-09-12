@@ -104,6 +104,8 @@ type deleteIn struct {
 	ID string `json:"id" jsonschema:"note id to delete"`
 }
 
+type statsIn struct{}
+
 func (a *Adapter) registerTools() {
 	if a.enabled("mem_search") {
 		mcp.AddTool(a.server, &mcp.Tool{
@@ -221,6 +223,19 @@ func (a *Adapter) registerTools() {
 				return errResult(err), nil, nil
 			}
 			return jsonResult(map[string]string{"deleted": in.ID}), nil, nil
+		})
+	}
+
+	if a.enabled("mem_stats") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_stats",
+			Description: "Report summary statistics about the memory store: total notes, notes per project, total links, notes missing a vector, and notes updated in the last 7 days.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, _ statsIn) (*mcp.CallToolResult, any, error) {
+			st, err := a.eng.Stats(ctx)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(st), nil, nil
 		})
 	}
 }

@@ -117,15 +117,20 @@ edges. The store computes backlinks by reverse lookup.
   `internal/embed`: it talks to an OpenAI-compatible
   `/v1/chat/completions` endpoint, and it accepts the same
   comma-separated fallback list.
+- **Analytics**: `mem_stats` (and `GET /api/stats`) return a snapshot of
+  the store: total notes, total projects, a per-project note count,
+  total links, notes with no vector yet, and notes updated in the last
+  7 days. The web UI shows the same figures on a stats panel. This
+  gives an operator a quick health check without a database client.
 
 ## Interfaces (one process)
 
 - **MCP** (stdio and streamable HTTP): tools `mem_search`, `mem_read`,
   `mem_write`, `mem_patch`, `mem_links`, `mem_list`, `mem_delete`,
-  `mem_suggest_links`, `mem_summarize`.
+  `mem_suggest_links`, `mem_summarize`, `mem_stats`.
 - **REST**: `GET/POST/PATCH/DELETE /api/notes`, `GET /api/search`,
   `GET /api/notes/{id}/links`, `GET /api/notes/{id}/suggestions`,
-  `GET /api/notes/{id}/summary`, `POST /api/reembed`.
+  `GET /api/notes/{id}/summary`, `POST /api/reembed`, `GET /api/stats`.
 - **Web UI**: the server renders markdown to HTML with goldmark
   (CommonMark and GFM, extended for `[[wikilinks]]` and callouts). The
   client renders mermaid diagrams and math (KaTeX). The UI favors

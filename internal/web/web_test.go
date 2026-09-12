@@ -22,6 +22,7 @@ func (m *ms) Delete(context.Context, string) error                        { retu
 func (m *ms) List(context.Context, string, int, int) ([]core.Note, error) { return nil, nil }
 func (m *ms) Count(context.Context) (int, error)                          { return 0, nil }
 func (m *ms) MissingVectorIDs(context.Context) ([]string, error)          { return nil, nil }
+func (m *ms) Stats(context.Context) (core.Stats, error)                   { return core.Stats{TotalNotes: len(m.n)}, nil }
 func (m *ms) SearchSemantic(context.Context, string, []float32, int) ([]core.SearchHit, error) {
 	return nil, nil
 }
@@ -42,7 +43,7 @@ func TestPagesRenderOwnContent(t *testing.T) {
 	}
 	mux := s.Routes()
 	for _, c := range []struct{ path, want string }{
-		{"/new", `id="ed-body"`}, {"/", `notelist`}, {"/note/x", `class="rendered"`}, {"/search", `id="search-results"`},
+		{"/new", `id="ed-body"`}, {"/", `notelist`}, {"/note/x", `class="rendered"`}, {"/search", `id="search-results"`}, {"/stats", `stat-num`},
 	} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest("GET", c.path, nil))

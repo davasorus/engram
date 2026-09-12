@@ -81,8 +81,8 @@ With the allowlist above, the agent sees exactly three tools:
 | `mem_write`  | create/update a note (upsert by slug id)   |
 
 `mem_patch`, `mem_list`, `mem_links`, `mem_delete`, `mem_suggest_links`,
-and `mem_summarize` stay reachable through REST and the web UI. These are
-human and maintenance operations. `mem_summarize` also needs a configured
+`mem_summarize`, and `mem_stats` stay reachable through REST and the web UI.
+These are human and maintenance operations. `mem_summarize` also needs a configured
 chat-completion endpoint (`--complete-url`); without it, engram returns
 501 for summary requests.
 Smaller models, such as Gemma-12B-class models, call tools more reliably
