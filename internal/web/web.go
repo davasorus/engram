@@ -41,7 +41,7 @@ func New(eng *core.Engine) (*Server, error) {
 	// base.html + shared partials + that ONE page. This isolates the content
 	// block so every page renders its own.
 	shared := []string{"templates/base.html", "templates/search_results.html", "templates/search_dropdown.html"}
-	pageFiles := []string{"list.html", "view.html", "search.html", "edit.html"}
+	pageFiles := []string{"list.html", "view.html", "search.html", "edit.html", "stats.html"}
 
 	pages := map[string]*template.Template{}
 	for _, p := range pageFiles {
@@ -69,6 +69,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /note/{id}", s.view)
 	mux.HandleFunc("GET /search", s.search)
+	mux.HandleFunc("GET /stats", s.stats)
 	mux.HandleFunc("GET /frag/search", s.searchFragment)
 	mux.HandleFunc("GET /edit/{id}", s.edit)
 	mux.HandleFunc("GET /new", s.newNote)
@@ -134,6 +135,15 @@ func (s *Server) searchFragment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.renderFragment(w, "search_results", data)
+}
+
+func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
+	st, err := s.eng.Stats(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	s.render(w, "stats.html", map[string]any{"Stats": st})
 }
 
 func (s *Server) edit(w http.ResponseWriter, r *http.Request) {

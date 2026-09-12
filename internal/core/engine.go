@@ -171,6 +171,12 @@ func (e *Engine) Backlinks(ctx context.Context, idOrTitle string) ([]Backlink, e
 	return e.store.Backlinks(ctx, idOrTitle)
 }
 
+// Stats returns summary counts over the whole memory store, for the
+// REST /api/stats endpoint, the mem_stats MCP tool, the CLI, and the web UI.
+func (e *Engine) Stats(ctx context.Context) (Stats, error) {
+	return e.store.Stats(ctx)
+}
+
 // Search runs semantic search by default. When kind=="keyword", it runs
 // keyword matching only. When kind=="hybrid", it combines both signals with
 // rank fusion. If semantic search is unavailable (embedding failure), the

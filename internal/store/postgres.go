@@ -281,6 +281,56 @@ func (p *Postgres) MissingVectorIDs(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
+// Stats gathers summary counts with a handful of aggregate queries. It is
+// meant for occasional dashboard/CLI use, not a hot path, so a few round
+// trips (rather than one large UNION) keeps each query simple and readable.
+func (p *Postgres) Stats(ctx context.Context) (core.Stats, error) {
+	var st core.Stats
+
+	if err := p.pool.QueryRow(ctx, `SELECT COUNT(*) FROM notes`).Scan(&st.TotalNotes); err != nil {
+		return st, fmt.Errorf("count notes: %w", err)
+	}
+
+	rows, err := p.pool.Query(ctx, `
+SELECT project, COUNT(*) FROM notes
+WHERE project IS NOT NULL AND project <> ''
+GROUP BY project ORDER BY project`)
+	if err != nil {
+		return st, fmt.Errorf("notes by project: %w", err)
+	}
+	byProject := map[string]int{}
+	for rows.Next() {
+		var proj string
+		var n int
+		if err := rows.Scan(&proj, &n); err != nil {
+			rows.Close()
+			return st, fmt.Errorf("scan notes by project: %w", err)
+		}
+		byProject[proj] = n
+	}
+	if err := rows.Err(); err != nil {
+		return st, fmt.Errorf("notes by project: %w", err)
+	}
+	rows.Close()
+	st.NotesByProject = byProject
+	st.TotalProjects = len(byProject)
+
+	if err := p.pool.QueryRow(ctx, `SELECT COUNT(*) FROM links`).Scan(&st.TotalLinks); err != nil {
+		return st, fmt.Errorf("count links: %w", err)
+	}
+
+	if err := p.pool.QueryRow(ctx, `SELECT COUNT(*) FROM notes WHERE embedding IS NULL`).Scan(&st.NotesMissingVector); err != nil {
+		return st, fmt.Errorf("count notes missing vector: %w", err)
+	}
+
+	if err := p.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM notes WHERE updated >= now() - interval '7 days'`).Scan(&st.UpdatedLast7Days); err != nil {
+		return st, fmt.Errorf("count recently updated notes: %w", err)
+	}
+
+	return st, nil
+}
+
 // SearchSemantic runs pgvector KNN directly in SQL — the DB does the ranking,
 // so this scales with the HNSW index instead of pulling all vectors into Go.
 func (p *Postgres) SearchSemantic(ctx context.Context, project string, query []float32, limit int) ([]core.SearchHit, error) {

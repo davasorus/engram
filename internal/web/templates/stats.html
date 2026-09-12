@@ -1,0 +1,35 @@
+{{define "title"}}engram — stats{{end}}
+{{define "content"}}
+<h1>Memory stats</h1>
+<div class="stats-grid">
+  <div class="stat-card">
+    <span class="stat-num">{{.Stats.TotalNotes}}</span>
+    <span class="stat-label">notes</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-num">{{.Stats.TotalProjects}}</span>
+    <span class="stat-label">projects</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-num">{{.Stats.TotalLinks}}</span>
+    <span class="stat-label">links</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-num">{{.Stats.NotesMissingVector}}</span>
+    <span class="stat-label">missing vectors</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-num">{{.Stats.UpdatedLast7Days}}</span>
+    <span class="stat-label">updated last 7 days</span>
+  </div>
+</div>
+{{if .Stats.NotesByProject}}
+<h2>Notes by project</h2>
+<ul class="notelist">
+{{range $project, $count := .Stats.NotesByProject}}
+  <li><span class="project-badge" title="project scope">{{$project}}</span> <span class="meta">{{$count}} notes</span></li>
+{{end}}
+</ul>
+{{end}}
+{{end}}
+{{template "base" .}}

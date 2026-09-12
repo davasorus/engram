@@ -223,3 +223,10 @@ func (c *Client) Reembed(ctx context.Context, full bool) (int, error) {
 	err := c.do(ctx, http.MethodPost, path, nil, &out)
 	return out.Reembedded, err
 }
+
+// Stats calls GET /api/stats.
+func (c *Client) Stats(ctx context.Context) (core.Stats, error) {
+	var out core.Stats
+	err := c.do(ctx, http.MethodGet, "/api/stats", nil, &out)
+	return out, err
+}
