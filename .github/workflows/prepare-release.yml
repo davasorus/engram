@@ -1,21 +1,26 @@
 name: prepare-release
 
-# Runs automatically on every push to `live`. It can also run manually
-# (Actions tab -> prepare-release -> Run workflow) to force a specific
-# version.
+# STANDARD release-tagging workflow (shared shape across davasorus repos:
+# computah, engram, gitmate). Runs automatically on every push to `live`,
+# and can also run manually (Actions tab -> prepare-release -> Run workflow)
+# to force a specific version.
 #
-# In automatic mode, semantic-release inspects Conventional Commits since
-# the last tag in DRY RUN ONLY (it creates nothing) to decide whether a
-# release is warranted and, if so, the next version: feat -> minor,
-# fix -> patch, "!"/BREAKING CHANGE -> major, anything else -> no bump.
-# If there is nothing release-worthy, the workflow exits quietly.
+# In automatic mode, svu (github.com/caarlos0/svu) inspects Conventional
+# Commits since the last tag to decide whether a release is warranted and,
+# if so, the next version: feat -> minor, fix -> patch, "!"/BREAKING CHANGE
+# -> major, anything else -> no bump. If there is nothing release-worthy,
+# the workflow exits quietly (see the `propose` job).
 #
-# semantic-release only DECIDES the version here. Once the tag is pushed,
-# the existing `release` workflow builds binaries and container images and
-# writes the GitHub Release notes with GoReleaser, which groups the same
-# Conventional Commits into sections (Features, Bug fixes, ...). Keeping one
-# tool per job avoids two competing changelog renderers — version bump comes
-# from semantic-release, release note organization comes from GoReleaser.
+# Before the tag is created, the `gate` job requires manual approval via the
+# `release` GitHub Environment. This mirrors gitmate's build pipeline gate,
+# applied here to the (much cheaper) tagging step: nothing is pushed until a
+# human reviews the proposed version and approves.
+#
+# svu only DECIDES the version here. Once the tag is pushed, the repo's
+# `release` workflow (GoReleaser) builds artifacts, container images, and
+# writes GitHub Release notes, grouping the same Conventional Commits into
+# sections (Features, Bug fixes, ...). One tool per job: svu picks the
+# version, GoReleaser organizes the changelog.
 #
 # Requires a repo secret RELEASE_PAT (contents: read/write on this repo) so
 # the push authenticates as a real account rather than github-actions[bot]
@@ -27,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version override, no leading v (e.g. 0.2.0). Leave blank to let semantic-release decide."
+        description: "Version override, no leading v (e.g. 0.2.0). Leave blank to auto-compute from Conventional Commits."
         required: false
 
 permissions:
@@ -38,52 +43,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tag:
+  # ---- PROPOSE: compute the next tag. Creates nothing. ----
+  propose:
     runs-on: ubuntu-latest
-    # The bump commit below is pushed with RELEASE_PAT, which re-triggers this
-    # workflow's `push` event. Skip that second run instead of letting
-    # semantic-release re-evaluate an already-tagged commit.
+    # The tag/bump commit is pushed with RELEASE_PAT below, which re-triggers
+    # this workflow's `push` event. Skip that second run instead of letting
+    # svu re-evaluate an already-tagged commit.
     if: ${{ !startsWith(github.event.head_commit.message, 'chore(release)') }}
+    outputs:
+      skip: ${{ steps.next.outputs.skip }}
+      tag: ${{ steps.next.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: live
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PAT }}
 
-      - name: validate version override
-        if: ${{ inputs.version != '' }}
-        run: |
-          set -euo pipefail
-          v="${{ inputs.version }}"
-          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not semver: $v" >&2; exit 1; }
-
-      - name: compute next version (semantic-release, dry run)
-        id: semrel
+      - uses: actions/setup-go@v7
         if: ${{ inputs.version == '' }}
-        uses: cycjimmy/semantic-release-action@v6
         with:
-          dry_run: true
-          semantic_version: 25
-          extra_plugins: |
-            @semantic-release/commit-analyzer
-            @semantic-release/release-notes-generator
-            conventional-changelog-conventionalcommits@9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          go-version: "1.25"
+          cache: true
 
-      - name: determine tag
+      - name: install svu
+        if: ${{ inputs.version == '' }}
+        run: go install github.com/caarlos0/svu/v3@latest
+
+      - name: compute next version
         id: next
         run: |
           set -euo pipefail
           if [[ -n "${{ inputs.version }}" ]]; then
-            tag="v${{ inputs.version }}"
-          elif [[ "${{ steps.semrel.outputs.new_release_published }}" == "true" ]]; then
-            tag="v${{ steps.semrel.outputs.new_release_version }}"
+            v="${{ inputs.version }}"
+            [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not semver: $v" >&2; exit 1; }
+            tag="v${v}"
           else
-            echo "no release-worthy commits since the last tag — nothing to do"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            current="$(svu current)"
+            tag="$(svu next)"
+            if [[ "$tag" == "$current" ]]; then
+              echo "no release-worthy commits since ${current} — nothing to do"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
           if git rev-parse "$tag" >/dev/null 2>&1; then
             echo "tag $tag already exists" >&2
@@ -91,12 +92,32 @@ jobs:
           fi
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "### Proposed release: ${tag}" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---- GATE: a human reviews the proposal above and approves. Nothing tagged yet. ----
+  gate:
+    needs: propose
+    if: ${{ needs.propose.outputs.skip == 'false' }}
+    runs-on: ubuntu-latest
+    environment: release # required reviewer here -> pauses for approval
+    steps:
+      - run: echo "Approved. Proceeding to tag ${{ needs.propose.outputs.tag }}."
+
+  # ---- TAG: only after approval. Pushing the tag triggers the `release` workflow. ----
+  tag:
+    needs: [propose, gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: live
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
 
       - name: bump ENGRAM_VERSION, commit, and tag
-        if: ${{ steps.next.outputs.skip == 'false' }}
         run: |
           set -euo pipefail
-          tag="${{ steps.next.outputs.tag }}"
+          tag="${{ needs.propose.outputs.tag }}"
           version="${tag#v}"
           sed -i -E "s/^ENGRAM_VERSION=.*/ENGRAM_VERSION=${version}/" compose/.env.example
           git config user.name "github-actions[bot]"
