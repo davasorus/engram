@@ -90,3 +90,16 @@ type Embedder interface {
 	// re-embedding.
 	Model() string
 }
+
+// Summarizer turns text into a short natural-language completion. It backs
+// optional, LLM-driven features such as note summarization. Unlike Embedder,
+// a Summarizer is optional: engram has no built-in requirement for a chat/
+// completion endpoint, so a deployment can leave this unset.
+type Summarizer interface {
+	// Complete returns the model's reply to a single prompt.
+	Complete(ctx context.Context, prompt string) (string, error)
+	// Configured reports whether a completion endpoint is actually set up.
+	// A Summarizer with Configured() == false behaves as "not available":
+	// callers should report that clearly rather than attempt the call.
+	Configured() bool
+}

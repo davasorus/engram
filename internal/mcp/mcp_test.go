@@ -92,7 +92,7 @@ func TestNew_EmptyAllowlistExposesAllTools(t *testing.T) {
 	a := emcp.New(eng, nil)
 
 	got := listToolNames(t, a)
-	want := []string{"mem_delete", "mem_links", "mem_list", "mem_patch", "mem_read", "mem_search", "mem_suggest_links", "mem_write"}
+	want := []string{"mem_delete", "mem_links", "mem_list", "mem_patch", "mem_read", "mem_search", "mem_suggest_links", "mem_summarize", "mem_write"}
 	sort.Strings(want)
 	if len(got) != len(want) {
 		t.Fatalf("got %d tools %v, want %d %v", len(got), got, len(want), want)

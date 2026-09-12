@@ -17,6 +17,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/davasorus/engram/internal/complete"
 	"github.com/davasorus/engram/internal/core"
 	"github.com/davasorus/engram/internal/embed"
 	emcp "github.com/davasorus/engram/internal/mcp"
@@ -38,6 +39,8 @@ func main() {
 		addr       = flag.String("addr", env("ENGRAM_ADDR", ":8088"), "HTTP listen address")
 		embedURL   = flag.String("embed-url", env("ENGRAM_EMBED_URL", "http://127.0.0.1:1234"), "OpenAI-compatible embeddings base URL(s); comma-separated for fallback, tried in order")
 		embedModel = flag.String("embed-model", env("ENGRAM_EMBED_MODEL", "text-embedding-nomic-embed-text-v1.5"), "embedding model id")
+		compURL    = flag.String("complete-url", env("ENGRAM_COMPLETE_URL", ""), "OpenAI-compatible chat-completion base URL(s); comma-separated for fallback. Optional: enables mem_summarize / GET /api/notes/{id}/summary. Empty disables the feature.")
+		compModel  = flag.String("complete-model", env("ENGRAM_COMPLETE_MODEL", ""), "chat-completion model id (required if --complete-url is set)")
 		mcpTools   = flag.String("mcp-tools", env("ENGRAM_MCP_TOOLS", ""), "comma-separated MCP tool allowlist, e.g. mem_search,mem_read,mem_write (empty = all tools)")
 		stdio      = flag.Bool("stdio", false, "run the MCP server over stdio instead of HTTP")
 		healthck   = flag.Bool("healthcheck", false, "probe the local /api/health endpoint and exit 0/1 (for container HEALTHCHECK)")
@@ -82,6 +85,11 @@ func main() {
 
 	emb := embed.NewWithFallback(strings.Split(*embedURL, ","), *embedModel)
 	eng := core.NewEngine(st, emb)
+	if *compURL != "" {
+		comp := complete.NewWithFallback(strings.Split(*compURL, ","), *compModel)
+		eng = eng.WithSummarizer(comp)
+		log.Printf("engram: summarization enabled (complete=%s model=%s)", *compURL, *compModel)
+	}
 	var allowedTools []string
 	if *mcpTools != "" {
 		allowedTools = strings.Split(*mcpTools, ",")

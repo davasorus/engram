@@ -34,6 +34,7 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("DELETE /api/notes/{id}", a.delete)
 	mux.HandleFunc("GET /api/notes/{id}/links", a.links)
 	mux.HandleFunc("GET /api/notes/{id}/suggestions", a.suggestions)
+	mux.HandleFunc("GET /api/notes/{id}/summary", a.summary)
 	mux.HandleFunc("POST /api/reembed", a.reembed)
 	mux.HandleFunc("GET /api/health", a.health)
 	return mux
@@ -160,6 +161,15 @@ func (a *API) suggestions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, hits)
 }
 
+func (a *API) summary(w http.ResponseWriter, r *http.Request) {
+	s, err := a.eng.Summarize(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeEngErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"summary": s})
+}
+
 func (a *API) reembed(w http.ResponseWriter, r *http.Request) {
 	n, err := a.eng.Reembed(r.Context())
 	if err != nil {
@@ -190,6 +200,8 @@ func writeEngErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 	case core.IsNotFound(err):
 		writeErr(w, http.StatusNotFound, err.Error())
+	case core.IsNotConfigured(err):
+		writeErr(w, http.StatusNotImplemented, err.Error())
 	default:
 		writeErr(w, http.StatusInternalServerError, err.Error())
 	}

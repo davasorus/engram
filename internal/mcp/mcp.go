@@ -92,6 +92,9 @@ type suggestIn struct {
 	ID    string `json:"id" jsonschema:"note id to find cross-link suggestions for"`
 	Limit int    `json:"limit,omitempty" jsonschema:"max suggestions (default 10)"`
 }
+type summarizeIn struct {
+	ID string `json:"id" jsonschema:"note id to summarize"`
+}
 type listIn struct {
 	Project string `json:"project,omitempty" jsonschema:"restrict to this project scope (optional)"`
 	Limit   int    `json:"limit,omitempty"`
@@ -180,6 +183,19 @@ func (a *Adapter) registerTools() {
 				return errResult(err), nil, nil
 			}
 			return jsonResult(hits), nil, nil
+		})
+	}
+
+	if a.enabled("mem_summarize") {
+		mcp.AddTool(a.server, &mcp.Tool{
+			Name:        "mem_summarize",
+			Description: "Summarize a note's body in 2-3 sentences using a completion model. Only available when the deployment has a completion endpoint configured; returns an error otherwise.",
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, in summarizeIn) (*mcp.CallToolResult, any, error) {
+			s, err := a.eng.Summarize(ctx, in.ID)
+			if err != nil {
+				return errResult(err), nil, nil
+			}
+			return jsonResult(map[string]string{"summary": s}), nil, nil
 		})
 	}
 
