@@ -14,12 +14,21 @@ import (
 // Engine is the single source of business logic. MCP, REST, and the web UI are
 // all thin adapters over this — so the three interfaces can never drift apart.
 type Engine struct {
-	store    Store
-	embedder Embedder
+	store      Store
+	embedder   Embedder
+	summarizer Summarizer // optional; nil when no completion endpoint is configured
 }
 
 func NewEngine(s Store, e Embedder) *Engine {
 	return &Engine{store: s, embedder: e}
+}
+
+// WithSummarizer attaches an optional Summarizer (a completion client) to
+// the engine, enabling Summarize. It returns the same *Engine for chaining
+// at construction time, e.g. core.NewEngine(st, emb).WithSummarizer(comp).
+func (e *Engine) WithSummarizer(sm Summarizer) *Engine {
+	e.summarizer = sm
+	return e
 }
 
 var (
@@ -325,6 +334,42 @@ func (e *Engine) SuggestLinks(ctx context.Context, id string, limit int) ([]Sear
 		}
 	}
 	return out, nil
+}
+
+// maxSummarizeBodyRunes bounds how much of a note's body is sent to the
+// completion endpoint. This keeps the prompt inside a small local model's
+// context window and keeps a single request cheap and fast.
+const maxSummarizeBodyRunes = 8000
+
+// Summarize asks the configured Summarizer for a short summary of a note's
+// body. It returns ErrNotConfigured if no completion endpoint is set up, so
+// callers (REST, MCP) can report clearly that this feature is optional and
+// currently unavailable, rather than a generic failure.
+func (e *Engine) Summarize(ctx context.Context, id string) (string, error) {
+	if err := validateID(id); err != nil {
+		return "", err
+	}
+	if e.summarizer == nil || !e.summarizer.Configured() {
+		return "", ErrNotConfigured
+	}
+	n, err := e.store.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if n == nil {
+		return "", notFoundf("note %q not found", id)
+	}
+	body := n.Body
+	if r := []rune(body); len(r) > maxSummarizeBodyRunes {
+		body = string(r[:maxSummarizeBodyRunes])
+	}
+	prompt := "Summarize the following note in 2-3 sentences. Be factual and concise; " +
+		"do not add information that is not in the note.\n\nTitle: " + n.Title + "\n\n" + body
+	summary, err := e.summarizer.Complete(ctx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("summarize: %w", err)
+	}
+	return summary, nil
 }
 
 // Reembed rebuilds vectors for every note (e.g. after an embedding-model

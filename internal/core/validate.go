@@ -16,6 +16,17 @@ var ErrInvalidInput = errors.New("invalid input")
 // Adapters use this to choose a 404-class response.
 var ErrNotFound = errors.New("not found")
 
+// ErrNotConfigured marks an error as "this optional capability has no
+// backend configured" (for example, Summarize with no completion endpoint
+// set up). Adapters use this to choose a 501-class response, distinct from
+// a runtime failure of a capability that is supposed to work.
+var ErrNotConfigured = errors.New("not configured")
+
+// IsNotConfigured reports whether err represents a missing optional backend.
+func IsNotConfigured(err error) bool {
+	return errors.Is(err, ErrNotConfigured)
+}
+
 // notFoundErr wraps msg so errors.Is(err, ErrNotFound) is true.
 type notFoundErr struct{ msg string }
 

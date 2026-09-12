@@ -97,17 +97,25 @@ edges. The store computes backlinks by reverse lookup.
   `GET /api/notes/{id}/suggestions`) reuse the note's own vector to find
   other notes that are semantically close but not yet linked. This gives
   an agent a proactive cross-linking aid without a separate completion
-  call. It does not generate a written summary; engram has no chat or
-  completion client, only an embeddings client.
+  call. It does not generate a written summary.
+- **Summarization**: `mem_summarize` (and `GET /api/notes/{id}/summary`)
+  send the note body to an optional chat-completion endpoint and return
+  a short written summary. This feature is opt-in. Set `--complete-url`
+  (or `ENGRAM_COMPLETE_URL`) and `--complete-model` to enable it. Without
+  a configured endpoint, engram returns a 501 error for both the tool
+  call and the REST endpoint. The `internal/complete` package mirrors
+  `internal/embed`: it talks to an OpenAI-compatible
+  `/v1/chat/completions` endpoint, and it accepts the same
+  comma-separated fallback list.
 
 ## Interfaces (one process)
 
 - **MCP** (stdio and streamable HTTP): tools `mem_search`, `mem_read`,
   `mem_write`, `mem_patch`, `mem_links`, `mem_list`, `mem_delete`,
-  `mem_suggest_links`.
+  `mem_suggest_links`, `mem_summarize`.
 - **REST**: `GET/POST/PATCH/DELETE /api/notes`, `GET /api/search`,
   `GET /api/notes/{id}/links`, `GET /api/notes/{id}/suggestions`,
-  `POST /api/reembed`.
+  `GET /api/notes/{id}/summary`, `POST /api/reembed`.
 - **Web UI**: the server renders markdown to HTML with goldmark
   (CommonMark and GFM, extended for `[[wikilinks]]` and callouts). The
   client renders mermaid diagrams and math (KaTeX). The UI favors

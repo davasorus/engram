@@ -35,7 +35,14 @@ data:
   # Must match the embed model's output width (nomic-embed-text-v1.5 = 768).
   ENGRAM_DIMS: "768"
   ENGRAM_ADDR: ":8088"
-  # MCP tool allowlist for agents (empty = all seven tools).
+  # Optional chat-completion endpoint (OpenAI-compatible). It enables
+  # mem_summarize and GET /api/notes/{id}/summary. Leave both values empty
+  # to disable summarization; engram then returns 501 for those calls.
+  # Accepts a comma-separated list of base URLs for fallback, same as
+  # ENGRAM_EMBED_URL above.
+  ENGRAM_COMPLETE_URL: ""
+  ENGRAM_COMPLETE_MODEL: ""
+  # MCP tool allowlist for agents (empty = all nine tools).
   ENGRAM_MCP_TOOLS: "mem_search,mem_read,mem_write"
   # Database identity. Password comes from the engram-db secret (step 1) —
   # by design there is no password field in this file.

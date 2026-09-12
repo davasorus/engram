@@ -66,6 +66,24 @@ func newAPI() http.Handler {
 	return rest.New(eng).Routes()
 }
 
+type fakeSummarizer struct {
+	reply string
+	err   error
+}
+
+func (f fakeSummarizer) Configured() bool { return true }
+func (f fakeSummarizer) Complete(context.Context, string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.reply, nil
+}
+
+func newAPIWithSummarizer(s core.Summarizer) http.Handler {
+	eng := core.NewEngine(newMem(), fakeEmbedder{}).WithSummarizer(s)
+	return rest.New(eng).Routes()
+}
+
 // --- tests ------------------------------------------------------------------
 
 func TestHealth(t *testing.T) {
@@ -239,6 +257,43 @@ func TestPatchMissingNote404(t *testing.T) {
 	newAPI().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSummaryEndpoint_NotConfigured confirms a deployment with no
+// completion endpoint reports 501, not a generic 500.
+func TestSummaryEndpoint_NotConfigured(t *testing.T) {
+	api := newAPI()
+	req := httptest.NewRequest("POST", "/api/notes", strings.NewReader(`{"title":"Doc","body":"some body text"}`))
+	req.Header.Set("Content-Type", "application/json")
+	api.ServeHTTP(httptest.NewRecorder(), req)
+
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, httptest.NewRequest("GET", "/api/notes/doc/summary", nil))
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSummaryEndpoint_Configured confirms a configured summarizer returns
+// its completion text through GET /api/notes/{id}/summary.
+func TestSummaryEndpoint_Configured(t *testing.T) {
+	api := newAPIWithSummarizer(fakeSummarizer{reply: "a short summary"})
+	req := httptest.NewRequest("POST", "/api/notes", strings.NewReader(`{"title":"Doc","body":"some body text"}`))
+	req.Header.Set("Content-Type", "application/json")
+	api.ServeHTTP(httptest.NewRecorder(), req)
+
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, httptest.NewRequest("GET", "/api/notes/doc/summary", nil))
+	if rec.Code != 200 {
+		t.Fatalf("summary status %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal summary body: %v", err)
+	}
+	if body["summary"] != "a short summary" {
+		t.Fatalf("summary: %q", body["summary"])
 	}
 }
 
