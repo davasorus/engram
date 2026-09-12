@@ -30,8 +30,8 @@ type Note struct {
 // SearchHit is a note plus its relevance to a query.
 type SearchHit struct {
 	Note  Note    `json:"note"`
-	Score float64 `json:"score"` // cosine similarity (semantic), 1.0 (keyword), or an RRF rank-fusion score (hybrid)
-	Kind  string  `json:"kind"`  // "semantic" | "keyword" | "hybrid"
+	Score float64 `json:"score"` // cosine similarity (semantic/suggestion), 1.0 (keyword), or an RRF rank-fusion score (hybrid)
+	Kind  string  `json:"kind"`  // "semantic" | "keyword" | "hybrid" | "suggestion"
 }
 
 // Backlink is a note that links TO the note being inspected.

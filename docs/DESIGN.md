@@ -93,13 +93,21 @@ edges. The store computes backlinks by reverse lookup.
   the body, hash, and vector atomically. There is no separate file to
   drift. A reembed operation can rebuild vectors, for example after you
   change embedding models.
+- **Cross-link suggestions**: `mem_suggest_links` (and
+  `GET /api/notes/{id}/suggestions`) reuse the note's own vector to find
+  other notes that are semantically close but not yet linked. This gives
+  an agent a proactive cross-linking aid without a separate completion
+  call. It does not generate a written summary; engram has no chat or
+  completion client, only an embeddings client.
 
 ## Interfaces (one process)
 
 - **MCP** (stdio and streamable HTTP): tools `mem_search`, `mem_read`,
-  `mem_write`, `mem_patch`, `mem_links`, `mem_list`, `mem_delete`.
+  `mem_write`, `mem_patch`, `mem_links`, `mem_list`, `mem_delete`,
+  `mem_suggest_links`.
 - **REST**: `GET/POST/PATCH/DELETE /api/notes`, `GET /api/search`,
-  `GET /api/notes/{id}/links`, `POST /api/reembed`.
+  `GET /api/notes/{id}/links`, `GET /api/notes/{id}/suggestions`,
+  `POST /api/reembed`.
 - **Web UI**: the server renders markdown to HTML with goldmark
   (CommonMark and GFM, extended for `[[wikilinks]]` and callouts). The
   client renders mermaid diagrams and math (KaTeX). The UI favors

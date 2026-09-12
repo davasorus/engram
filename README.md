@@ -77,7 +77,8 @@ podman play kube kube/engram.yaml       # runs on Podman
 
 Configure the agent's MCP client with an HTTP server at
 `http://<host>:8088/mcp/`. engram exposes these tools: `mem_search`,
-`mem_read`, `mem_write`, `mem_patch`, `mem_links`, `mem_list`, `mem_delete`.
+`mem_read`, `mem_write`, `mem_patch`, `mem_links`, `mem_list`, `mem_delete`,
+`mem_suggest_links`.
 
 ## Interfaces
 
@@ -85,7 +86,7 @@ Configure the agent's MCP client with an HTTP server at
   subprocess transport.
 - **REST** — `GET /api/search?q=&kind=semantic|keyword|hybrid`, `GET|POST /api/notes`,
   `GET|PATCH|DELETE /api/notes/{id}`, `GET /api/notes/{id}/links`,
-  `POST /api/reembed`, `GET /api/health`.
+  `GET /api/notes/{id}/suggestions`, `POST /api/reembed`, `GET /api/health`.
 - **Web UI** — browse notes, view rendered markdown (GFM, callouts, mermaid,
   KaTeX), run semantic, keyword, or hybrid search, and edit notes with a
   live-preview editor and wikilink autocomplete.

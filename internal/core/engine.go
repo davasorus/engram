@@ -269,6 +269,64 @@ func (e *Engine) hybrid(ctx context.Context, project, query string, limit int) (
 	return hits, nil
 }
 
+// SuggestLinks proposes notes that are semantically related to an existing
+// note but that it does not already link to. This gives agents a proactive
+// cross-linking aid: after writing a note, an agent can ask what else in
+// memory looks related and add [[wikilinks]] itself, without engram needing
+// an LLM completion call of its own — the suggestion is driven entirely by
+// the existing vector-similarity search.
+func (e *Engine) SuggestLinks(ctx context.Context, id string, limit int) ([]SearchHit, error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
+	n, err := e.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if n == nil {
+		return nil, notFoundf("note %q not found", id)
+	}
+	limit = clampLimit(limit, DefaultSearchLimit, MaxSearchLimit)
+
+	vec := n.Vector
+	if len(vec) == 0 {
+		v, err := e.embedder.Embed(ctx, embedText(n.Title, n.Body))
+		if err != nil {
+			return nil, fmt.Errorf("embed: %w", err)
+		}
+		vec = v
+	}
+
+	// Fetch extra candidates: the note itself and any note it already links
+	// to both get filtered out below, so ask for more than limit up front.
+	fetchLimit := clampLimit(limit+len(n.Links)+1, DefaultSearchLimit, MaxSearchLimit)
+	hits, err := e.store.SearchSemantic(ctx, "", vec, fetchLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	linked := make(map[string]bool, len(n.Links))
+	for _, l := range n.Links {
+		linked[strings.ToLower(l)] = true
+	}
+
+	out := make([]SearchHit, 0, limit)
+	for _, h := range hits {
+		if h.Note.ID == n.ID {
+			continue
+		}
+		if linked[strings.ToLower(h.Note.Title)] || linked[strings.ToLower(h.Note.ID)] {
+			continue
+		}
+		h.Kind = "suggestion"
+		out = append(out, h)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 // Reembed rebuilds vectors for every note (e.g. after an embedding-model
 // change). Returns the number re-embedded.
 func (e *Engine) Reembed(ctx context.Context) (int, error) {

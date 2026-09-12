@@ -33,6 +33,7 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("PATCH /api/notes/{id}", a.patch)
 	mux.HandleFunc("DELETE /api/notes/{id}", a.delete)
 	mux.HandleFunc("GET /api/notes/{id}/links", a.links)
+	mux.HandleFunc("GET /api/notes/{id}/suggestions", a.suggestions)
 	mux.HandleFunc("POST /api/reembed", a.reembed)
 	mux.HandleFunc("GET /api/health", a.health)
 	return mux
@@ -147,6 +148,16 @@ func (a *API) links(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, bl)
+}
+
+func (a *API) suggestions(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	hits, err := a.eng.SuggestLinks(r.Context(), r.PathValue("id"), limit)
+	if err != nil {
+		writeEngErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, hits)
 }
 
 func (a *API) reembed(w http.ResponseWriter, r *http.Request) {
