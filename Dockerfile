@@ -3,7 +3,7 @@
 # Image names are fully qualified so they resolve regardless of a host's
 # unqualified-search-registries configuration.
 
-FROM docker.io/library/golang:1.27-alpine@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS build
+FROM docker.io/library/golang:1.27-alpine@sha256:4cb7ac979db5fcc41cae44b2227ba5ab8a51e8807f40d9ba4dee20a0ad960b5b AS build
 WORKDIR /src
 # Cache deps first.
 COPY go.mod go.sum ./
