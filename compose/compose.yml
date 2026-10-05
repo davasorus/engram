@@ -22,7 +22,7 @@
 # docs/NETWORKING.md for what to adjust if that's your setup instead.
 services:
   db:
-    image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+    image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     container_name: engram-db
     network_mode: host
     environment:
