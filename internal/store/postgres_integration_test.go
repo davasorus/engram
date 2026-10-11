@@ -239,3 +239,246 @@ func TestPostgresProjectScoping(t *testing.T) {
 		t.Fatalf("scoped keyword: %+v", kw)
 	}
 }
+
+func TestPostgresStats(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	// Empty stats
+	st2, err := st.Stats(ctx)
+	if err != nil {
+		t.Fatalf("stats empty: %v", err)
+	}
+	if st2.TotalNotes != 0 {
+		t.Fatalf("expected 0 notes, got %d", st2.TotalNotes)
+	}
+	if st2.TotalProjects != 0 {
+		t.Fatalf("expected 0 projects, got %d", st2.TotalProjects)
+	}
+
+	// Add notes with vectors
+	st.Upsert(ctx, core.Note{ID: "s1", Title: "Stats One", Body: "stats test", Vector: []float32{1, 0, 0, 0}})
+	st.Upsert(ctx, core.Note{ID: "s2", Title: "Stats Two", Body: "stats test", Vector: []float32{1, 0, 0, 0}})
+	st.Upsert(ctx, core.Note{ID: "s3", Title: "Stats Three", Body: "stats test", Vector: nil}) // no vector
+	st.Upsert(ctx, core.Note{ID: "s4", Title: "Stats Four", Body: "stats test", Vector: []float32{1, 0, 0, 0}})
+
+	st2, err = st.Stats(ctx)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if st2.TotalNotes != 4 {
+		t.Fatalf("expected 4 notes, got %d", st2.TotalNotes)
+	}
+	if st2.TotalLinks != 0 {
+		t.Fatalf("expected 0 links, got %d", st2.TotalLinks)
+	}
+	if st2.NotesMissingVector != 1 {
+		t.Fatalf("expected 1 missing vector, got %d", st2.NotesMissingVector)
+	}
+}
+
+func TestPostgresMissingVectorIDs(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	// Initially empty
+	ids, err := st.MissingVectorIDs(ctx)
+	if err != nil {
+		t.Fatalf("missing vector empty: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("expected 0 missing, got %d", len(ids))
+	}
+
+	// Add notes: some with vectors, some without
+	st.Upsert(ctx, core.Note{ID: "mv1", Title: "MV1", Body: "body", Vector: []float32{1, 0, 0, 0}})
+	st.Upsert(ctx, core.Note{ID: "mv2", Title: "MV2", Body: "body", Vector: nil})
+	st.Upsert(ctx, core.Note{ID: "mv3", Title: "MV3", Body: "body", Vector: nil})
+	st.Upsert(ctx, core.Note{ID: "mv4", Title: "MV4", Body: "body", Vector: []float32{1, 0, 0, 0}})
+
+	ids, err = st.MissingVectorIDs(ctx)
+	if err != nil {
+		t.Fatalf("missing vector: %v", err)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 missing vectors, got %d: %v", len(ids), ids)
+	}
+	// Verify the correct IDs are returned
+	idSet := map[string]bool{}
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	if !idSet["mv2"] || !idSet["mv3"] {
+		t.Fatalf("expected mv2 and mv3, got %v", ids)
+	}
+}
+
+func TestPostgresCorruptFrontmatter(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	// First verify normal insert works
+	st.Upsert(ctx, core.Note{ID: "good-fm", Title: "Good FM", Body: "body", Vector: []float32{1, 0, 0, 0}})
+	got, err := st.Get(ctx, "good-fm")
+	if err != nil || got == nil {
+		t.Fatalf("good fm: %v", err)
+	}
+
+	// Verify empty frontmatter round-trips correctly
+	st.Upsert(ctx, core.Note{ID: "empty-fm", Title: "Empty FM", Body: "body", Frontmatter: nil, Vector: []float32{1, 0, 0, 0}})
+	got, err = st.Get(ctx, "empty-fm")
+	if err != nil || got == nil {
+		t.Fatalf("empty fm: %v", err)
+	}
+	if got.Frontmatter == nil {
+		t.Fatal("expected non-nil frontmatter, got nil")
+	}
+}
+
+func TestPostgresCorruptTags(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	// Verify empty tags round-trips correctly
+	st.Upsert(ctx, core.Note{ID: "empty-tags", Title: "Empty Tags", Body: "body", Tags: nil, Vector: []float32{1, 0, 0, 0}})
+	got, err := st.Get(ctx, "empty-tags")
+	if err != nil || got == nil {
+		t.Fatalf("empty tags: %v", err)
+	}
+	if got.Tags == nil {
+		t.Fatal("expected non-nil tags, got nil")
+	}
+
+	// Verify Upsert preserves non-nil tags
+	st.Upsert(ctx, core.Note{ID: "has-tags", Title: "Has Tags", Body: "body", Tags: []string{"a", "b"}, Vector: []float32{1, 0, 0, 0}})
+	got, err = st.Get(ctx, "has-tags")
+	if err != nil || got == nil {
+		t.Fatalf("has tags: %v", err)
+	}
+	if len(got.Tags) != 2 || got.Tags[0] != "a" || got.Tags[1] != "b" {
+		t.Fatalf("tags mismatch: %v", got.Tags)
+	}
+}
+
+func TestPostgresListPagination(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	// Insert 5 notes
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("pag-%d", i)
+		st.Upsert(ctx, core.Note{ID: id, Title: id, Body: id, Vector: []float32{1, 0, 0, 0}})
+	}
+
+	// First page: 2 items
+	page1, err := st.List(ctx, "", 2, 0)
+	if err != nil || len(page1) != 2 {
+		t.Fatalf("page 1: %v (%d)", err, len(page1))
+	}
+
+	// Second page: 2 items
+	page2, err := st.List(ctx, "", 2, 2)
+	if err != nil || len(page2) != 2 {
+		t.Fatalf("page 2: %v (%d)", err, len(page2))
+	}
+
+	// Third page: 1 item
+	page3, err := st.List(ctx, "", 2, 4)
+	if err != nil || len(page3) != 1 {
+		t.Fatalf("page 3: %v (%d)", err, len(page3))
+	}
+
+	// Fourth page: empty
+	page4, err := st.List(ctx, "", 2, 5)
+	if err != nil || len(page4) != 0 {
+		t.Fatalf("page 4: expected 0, got %d", len(page4))
+	}
+}
+
+func TestPostgresUpsertDuplicateLinks(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	// Upsert with duplicate links in the slice — only unique links should persist
+	n := core.Note{
+		ID: "dup-links", Title: "Dup Links", Body: "body",
+		Links:  []string{"target", "target", "other"},
+		Vector: []float32{1, 0, 0, 0},
+	}
+	if err := st.Upsert(ctx, n); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	// Retrieve and verify links were deduplicated
+	got, err := st.Get(ctx, "dup-links")
+	if err != nil || got == nil {
+		t.Fatalf("get dup-links: %v", err)
+	}
+	if len(got.Links) != 2 {
+		t.Fatalf("expected 2 unique links, got %d: %v", len(got.Links), got.Links)
+	}
+	linkSet := map[string]bool{got.Links[0]: true, got.Links[1]: true}
+	if !linkSet["target"] || !linkSet["other"] {
+		t.Fatalf("expected 'target' and 'other', got %v", got.Links)
+	}
+}
+
+func TestPostgresReembedAllEdgeCases(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	// Verify MissingVectorIDs returns empty when all have vectors
+	st.Upsert(ctx, core.Note{ID: "ra1", Title: "RA1", Body: "body", Vector: []float32{1, 0, 0, 0}})
+	st.Upsert(ctx, core.Note{ID: "ra2", Title: "RA2", Body: "body", Vector: []float32{1, 0, 0, 0}})
+
+	ids, err := st.MissingVectorIDs(ctx)
+	if err != nil {
+		t.Fatalf("missing vector: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("expected 0 missing vectors, got %d", len(ids))
+	}
+
+	// Verify List with zero limit defaults to 50
+	zeroList, err := st.List(ctx, "", 0, 0)
+	if err != nil {
+		t.Fatalf("list zero limit: %v", err)
+	}
+	if len(zeroList) != 2 {
+		t.Fatalf("expected 2 notes with zero limit, got %d", len(zeroList))
+	}
+}
+
+func TestPostgresKeywordSearchProjectScoping(t *testing.T) {
+	st, done := startPG(t)
+	defer done()
+	ctx := context.Background()
+
+	st.Upsert(ctx, core.Note{ID: "kw-eng", Project: "engram", Title: "Keyword Test", Body: "engram keyword search test", Vector: []float32{1, 0, 0, 0}})
+	st.Upsert(ctx, core.Note{ID: "kw-other", Project: "other", Title: "Keyword Test", Body: "other keyword search test", Vector: []float32{1, 0, 0, 0}})
+
+	// Scoped keyword search
+	kw, err := st.KeywordSearch(ctx, "engram", "keyword", 10)
+	if err != nil {
+		t.Fatalf("scoped keyword: %v", err)
+	}
+	if len(kw) != 1 || kw[0].ID != "kw-eng" {
+		t.Fatalf("expected only engram note, got %+v", kw)
+	}
+
+	// Unscoped returns both
+	all, err := st.KeywordSearch(ctx, "", "keyword", 10)
+	if err != nil {
+		t.Fatalf("unscoped keyword: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected 2 notes, got %d", len(all))
+	}
+}
