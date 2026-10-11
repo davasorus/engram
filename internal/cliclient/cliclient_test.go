@@ -13,12 +13,6 @@ import (
 	"github.com/davasorus/engram/internal/core"
 )
 
-// newTestServer returns a httptest.Server that mimics the engram REST API.
-func newTestServer(t *testing.T, handler http.Handler) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(handler)
-}
-
 // newTestClient returns a Client pointing at ts, and closes the server on test exit.
 func newTestClient(t *testing.T, ts *httptest.Server) *Client {
 	t.Helper()
@@ -100,7 +94,8 @@ func TestDo_Non2xxJSONBody(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "bad request"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "bad request"})
+		// ignore encode error in test
 	}))
 	defer ts.Close()
 	c := New(ts.URL)
@@ -116,7 +111,7 @@ func TestDo_Non2xxJSONBody(t *testing.T) {
 func TestDo_Non2xxNoJSONBody(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	}))
 	defer ts.Close()
 	c := New(ts.URL)
@@ -133,7 +128,7 @@ func TestDo_2xxMalformedJSON(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("not json"))
+		_, _ = w.Write([]byte("not json"))
 	}))
 	defer ts.Close()
 	c := New(ts.URL)
@@ -164,7 +159,7 @@ func TestDo_SetsContentType(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotContentType = r.Header.Get("Content-Type")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
 	c := New(ts.URL)
@@ -182,7 +177,7 @@ func TestDo_URLPathEscape(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotRequestURI = r.RequestURI
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
 	c := New(ts.URL)
@@ -207,7 +202,7 @@ func TestHealth(t *testing.T) {
 			t.Errorf("path = %s; want /api/health", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -236,7 +231,7 @@ func TestSearch_AllParams(t *testing.T) {
 			t.Errorf("kind param = %q; want semantic", q.Get("kind"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]core.SearchHit{})
+		_ = json.NewEncoder(w).Encode([]core.SearchHit{})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -262,7 +257,7 @@ func TestSearch_MinimalParams(t *testing.T) {
 			t.Errorf("kind param = %q; want empty", q.Get("kind"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]core.SearchHit{})
+		_ = json.NewEncoder(w).Encode([]core.SearchHit{})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -288,7 +283,7 @@ func TestList_AllParams(t *testing.T) {
 			t.Errorf("offset param = %q; want 5", q.Get("offset"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]core.Note{})
+		_ = json.NewEncoder(w).Encode([]core.Note{})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -314,7 +309,7 @@ func TestList_MinimalParams(t *testing.T) {
 			t.Errorf("offset param = %q; want empty", q.Get("offset"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]core.Note{})
+		_ = json.NewEncoder(w).Encode([]core.Note{})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -333,7 +328,7 @@ func TestGet_Success(t *testing.T) {
 			t.Errorf("path = %s; want /api/notes/my-id", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(core.Note{ID: "my-id", Title: "Test"})
+		_ = json.NewEncoder(w).Encode(core.Note{ID: "my-id", Title: "Test"})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -341,10 +336,7 @@ func TestGet_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if note == nil {
-		t.Fatal("note is nil; want non-nil")
-	}
-	if note.ID != "my-id" {
+	if note == nil || note.ID != "my-id" {
 		t.Errorf("ID = %q; want my-id", note.ID)
 	}
 }
@@ -353,7 +345,7 @@ func TestGet_NotFound(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -372,7 +364,7 @@ func TestWrite_Success(t *testing.T) {
 			t.Errorf("method = %s; want POST", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(core.Note{ID: "new-id", Title: "Test"})
+		_ = json.NewEncoder(w).Encode(core.Note{ID: "new-id", Title: "Test"})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -394,7 +386,7 @@ func TestWrite_Success(t *testing.T) {
 func TestWrite_Minimal(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(core.Note{ID: "x", Title: "T"})
+		_ = json.NewEncoder(w).Encode(core.Note{ID: "x", Title: "T"})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -413,7 +405,7 @@ func TestPatch_Success(t *testing.T) {
 			t.Errorf("method = %s; want PATCH", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(core.Note{ID: "patched-id", Title: "Updated"})
+		_ = json.NewEncoder(w).Encode(core.Note{ID: "patched-id", Title: "Updated"})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -431,7 +423,7 @@ func TestPatch_URLPathEscape(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotRequestURI = r.RequestURI
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -468,7 +460,7 @@ func TestLinks_Success(t *testing.T) {
 			t.Errorf("path = %s; want /api/notes/link-id/links", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]core.Backlink{})
+		_ = json.NewEncoder(w).Encode([]core.Backlink{})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -488,7 +480,7 @@ func TestSuggestions_Success(t *testing.T) {
 			t.Errorf("limit param = %q; want 5", q.Get("limit"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]core.SearchHit{})
+		_ = json.NewEncoder(w).Encode([]core.SearchHit{})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -508,7 +500,7 @@ func TestSuggestions_NoLimit(t *testing.T) {
 			t.Errorf("limit param = %q; want empty", q.Get("limit"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]core.SearchHit{})
+		_ = json.NewEncoder(w).Encode([]core.SearchHit{})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -524,7 +516,7 @@ func TestSuggestions_NoLimit(t *testing.T) {
 func TestSummary_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(summaryResponse{Summary: "A short summary."})
+		_ = json.NewEncoder(w).Encode(summaryResponse{Summary: "A short summary."})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -543,7 +535,7 @@ func TestReembed_Full(t *testing.T) {
 			t.Errorf("path/query = %s?%s; want /api/reembed?full=1", r.URL.Path, r.URL.RawQuery)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(reembedResponse{Reembedded: 42})
+		_ = json.NewEncoder(w).Encode(reembedResponse{Reembedded: 42})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -562,7 +554,7 @@ func TestReembed_NotFull(t *testing.T) {
 			t.Errorf("path = %s; want /api/reembed", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(reembedResponse{Reembedded: 0})
+		_ = json.NewEncoder(w).Encode(reembedResponse{Reembedded: 0})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
@@ -578,7 +570,7 @@ func TestReembed_NotFull(t *testing.T) {
 func TestStats_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(core.Stats{TotalNotes: 10, TotalProjects: 2, TotalLinks: 3, NotesMissingVector: 0, UpdatedLast7Days: 5})
+		_ = json.NewEncoder(w).Encode(core.Stats{TotalNotes: 10, TotalProjects: 2, TotalLinks: 3, NotesMissingVector: 0, UpdatedLast7Days: 5})
 	}))
 	defer ts.Close()
 	c := newTestClient(t, ts)
