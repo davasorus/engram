@@ -247,6 +247,15 @@ func (e *Engine) hybrid(ctx context.Context, project, query string, limit int) (
 	// Only fail if both signals are unavailable; a single degraded side still
 	// yields a usable (if narrower) result set.
 	if (embErr != nil || semErr != nil) && kwErr != nil {
+		if embErr != nil || semErr != nil {
+			return nil, fmt.Errorf("hybrid search failed: semantic: %w; keyword: %w",
+				func() error {
+					if semErr != nil {
+						return semErr
+					}
+					return embErr
+				}(), kwErr)
+		}
 		return nil, kwErr
 	}
 
@@ -394,6 +403,9 @@ func (e *Engine) reembedAll(ctx context.Context) (int, error) {
 	var n int
 	offset := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return n, err
+		}
 		batch, err := e.store.List(ctx, "", 100, offset)
 		if err != nil {
 			return n, err
@@ -419,6 +431,9 @@ func (e *Engine) reembedMissing(ctx context.Context) (int, error) {
 	}
 	var n int
 	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return n, err
+		}
 		note, err := e.store.Get(ctx, id)
 		if err != nil {
 			return n, err

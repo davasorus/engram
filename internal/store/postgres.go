@@ -193,8 +193,12 @@ func (p *Postgres) scanOne(ctx context.Context, q string, args ...any) (*core.No
 	if err := row.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated); err != nil {
 		return nil, err
 	}
-	_ = json.Unmarshal(fm, &n.Frontmatter)
-	_ = json.Unmarshal(tags, &n.Tags)
+	if err := json.Unmarshal(fm, &n.Frontmatter); err != nil {
+		return nil, fmt.Errorf("unmarshal frontmatter: %w", err)
+	}
+	if err := json.Unmarshal(tags, &n.Tags); err != nil {
+		return nil, fmt.Errorf("unmarshal tags: %w", err)
+	}
 	return &n, nil
 }
 
@@ -248,8 +252,12 @@ func (p *Postgres) scanMany(rows pgx.Rows) ([]core.Note, error) {
 		if err := rows.Scan(&n.ID, &n.Project, &n.Title, &n.Body, &fm, &tags, &n.ContentHash, &n.Created, &n.Updated); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal(fm, &n.Frontmatter)
-		_ = json.Unmarshal(tags, &n.Tags)
+		if err := json.Unmarshal(fm, &n.Frontmatter); err != nil {
+			return nil, fmt.Errorf("unmarshal frontmatter: %w", err)
+		}
+		if err := json.Unmarshal(tags, &n.Tags); err != nil {
+			return nil, fmt.Errorf("unmarshal tags: %w", err)
+		}
 		out = append(out, n)
 	}
 	return out, rows.Err()

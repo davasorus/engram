@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"html/template"
 	"io/fs"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,8 +23,8 @@ var assets embed.FS
 
 type Server struct {
 	eng   *core.Engine
-	pages map[string]*template.Template // page name -> base+page+fragments
-	frags *template.Template            // standalone fragments (search_results)
+	pages map[string]*template.Template
+	frags *template.Template
 }
 
 func New(eng *core.Engine) (*Server, error) {
@@ -80,7 +81,8 @@ func (s *Server) Routes() *http.ServeMux {
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	notes, err := s.eng.List(r.Context(), "", 100, 0)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		log.Printf("web: index: %v", err)
+		http.Error(w, "internal server error", 500)
 		return
 	}
 	count, _ := s.eng.Count(r.Context())
@@ -91,14 +93,18 @@ func (s *Server) view(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	n, err := s.eng.Read(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		log.Printf("web: view: %v", err)
+		http.Error(w, "internal server error", 500)
 		return
 	}
 	if n == nil {
 		http.NotFound(w, r)
 		return
 	}
-	bl, _ := s.eng.Backlinks(r.Context(), id)
+	bl, err := s.eng.Backlinks(r.Context(), id)
+	if err != nil {
+		log.Printf("web: view backlinks: %v", err)
+	}
 	s.render(w, "view.html", map[string]any{"Note": n, "Backlinks": bl})
 }
 
@@ -108,7 +114,13 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	var hits []core.SearchHit
 	if q != "" {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		hits, _ = s.eng.Search(r.Context(), "", q, limit, kind)
+		var err error
+		hits, err = s.eng.Search(r.Context(), "", q, limit, kind)
+		if err != nil {
+			log.Printf("web: search: %v", err)
+			http.Error(w, "internal server error", 500)
+			return
+		}
 	}
 	vms := toVMs(hits)
 	s.render(w, "search.html", map[string]any{"Query": q, "Kind": kind, "Results": vms, "Count": len(vms)})
@@ -126,7 +138,13 @@ func (s *Server) searchFragment(w http.ResponseWriter, r *http.Request) {
 		if mode == "dropdown" {
 			limit = 6
 		}
-		hits, _ = s.eng.Search(r.Context(), "", q, limit, kind)
+		var err error
+		hits, err = s.eng.Search(r.Context(), "", q, limit, kind)
+		if err != nil {
+			log.Printf("web: searchFragment: %v", err)
+			http.Error(w, "internal server error", 500)
+			return
+		}
 	}
 	vms := toVMs(hits)
 	data := map[string]any{"Query": q, "Kind": kind, "Results": vms, "Count": len(vms)}
@@ -196,7 +214,9 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(buf.Bytes())
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		log.Printf("web: render: write: %v", err)
+	}
 }
 
 // renderFragment renders a single {{define}}'d template by name (an HTML
@@ -208,5 +228,7 @@ func (s *Server) renderFragment(w http.ResponseWriter, name string, data any) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(buf.Bytes())
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		log.Printf("web: renderFragment: write: %v", err)
+	}
 }
