@@ -84,7 +84,11 @@ services:
         condition: service_healthy
     environment:
       ENGRAM_ADDR: ":${ENGRAM_PORT:-8088}"
-      ENGRAM_DSN: "postgres://${POSTGRES_USER:-engram}:${POSTGRES_PASSWORD:-engram}@localhost:${ENGRAM_PG_PORT:-5432}/${POSTGRES_DB:-engram}?sslmode=disable"
+      ENGRAM_DB_HOST: "localhost"
+      ENGRAM_DB_PORT: "${ENGRAM_PG_PORT:-5432}"
+      ENGRAM_DB_USER: "${POSTGRES_USER:-engram}"
+      ENGRAM_DB_PASSWORD: "${POSTGRES_PASSWORD:-engram}"
+      ENGRAM_DB_NAME: "${POSTGRES_DB:-engram}"
       ENGRAM_DIMS: "${ENGRAM_DIMS:-768}"
       ENGRAM_EMBED_URL: "${ENGRAM_EMBED_URL:-http://localhost:1234}"
       ENGRAM_EMBED_MODEL: "${ENGRAM_EMBED_MODEL:-text-embedding-nomic-embed-text-v1.5}"
