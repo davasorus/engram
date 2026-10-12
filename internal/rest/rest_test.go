@@ -30,12 +30,6 @@ func (m *memStore) setFail(op string) {
 	m.fail[op] = true
 }
 
-func (m *memStore) clearFail(op string) {
-	if m.fail != nil {
-		delete(m.fail, op)
-	}
-}
-
 func (m *memStore) Upsert(_ context.Context, n core.Note) error {
 	if m.fail["Upsert"] {
 		return fmt.Errorf("store error: Upsert")
@@ -695,7 +689,10 @@ func writeNote(api http.Handler, title, body string, kv ...string) (string, erro
 
 func TestPatchSuccess(t *testing.T) {
 	api := newAPI()
-	writeNote(api, "Patch Test", "hello world")
+	_, err := writeNote(api, "Patch Test", "hello world")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("PATCH", "/api/notes/patch-test",
@@ -717,7 +714,10 @@ func TestPatchSuccess(t *testing.T) {
 // TestPatchAmbiguousOldStr returns 400 when oldStr appears multiple times.
 func TestPatchAmbiguousOldStr(t *testing.T) {
 	api := newAPI()
-	writeNote(api, "Ambiguous", "foo bar foo")
+	_, err := writeNote(api, "Ambiguous", "foo bar foo")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("PATCH", "/api/notes/ambiguous",
@@ -817,19 +817,16 @@ func TestListStoreError(t *testing.T) {
 
 // TestDeleteStoreError confirms a store failure in Delete returns 500.
 func TestDeleteStoreError(t *testing.T) {
-	api := newAPI()
-	writeNote(api, "Delete Error", "body")
-
-	api2 := newAPIWithFail("Delete")
-	// The newAPIWithFail creates a fresh store, so we need to write first.
 	st := newMem()
+	if err := st.Upsert(context.Background(), core.Note{ID: "delete-error", Title: "Delete Error", Body: "body"}); err != nil {
+		t.Fatal(err)
+	}
 	st.setFail("Delete")
 	eng := core.NewEngine(st, fakeEmbedder{})
-	_, _ = eng.Write(context.Background(), core.WriteInput{Title: "Delete Error", Body: "body"})
-	api2 = rest.New(eng).Routes()
+	api := rest.New(eng).Routes()
 
 	rec := httptest.NewRecorder()
-	api2.ServeHTTP(rec, httptest.NewRequest("DELETE", "/api/notes/delete-error", nil))
+	api.ServeHTTP(rec, httptest.NewRequest("DELETE", "/api/notes/delete-error", nil))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
 	}
