@@ -272,6 +272,128 @@ func TestMemRead_MissingNote(t *testing.T) {
 	}
 }
 
+// TestMemRead_RoundTrip writes a note then reads it back to cover the
+// mem_read success path in registerTools (which the allowlist tests
+// only verify by name, not by execution).
+func TestMemRead_RoundTrip(t *testing.T) {
+	eng := core.NewEngine(newFakeStore(), fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	// Write a note first.
+	_, err = clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mem_write",
+		Arguments: map[string]any{"id": "read-test", "title": "Read Test", "body": "test body"},
+	})
+	if err != nil {
+		t.Fatalf("call mem_write: %v", err)
+	}
+
+	// Read it back.
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mem_read",
+		Arguments: map[string]any{"id": "read-test"},
+	})
+	if err != nil {
+		t.Fatalf("call mem_read: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("mem_read returned an error result: %+v", res.Content)
+	}
+}
+
+// TestMemList_RoundTrip exercises the mem_list success path in
+// registerTools, covering a different tool handler than the mem_write
+// round-trip test above.
+func TestMemList_RoundTrip(t *testing.T) {
+	eng := core.NewEngine(newFakeStore(), fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	// Write a note so list returns something.
+	_, err = clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mem_write",
+		Arguments: map[string]any{"id": "list-test", "title": "List Test", "body": "test"},
+	})
+	if err != nil {
+		t.Fatalf("call mem_write: %v", err)
+	}
+
+	// List notes.
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "mem_list",
+	})
+	if err != nil {
+		t.Fatalf("call mem_list: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("mem_list returned an error result: %+v", res.Content)
+	}
+}
+
+// TestMemStats_RoundTrip exercises the mem_stats success path in
+// registerTools.
+func TestMemStats_RoundTrip(t *testing.T) {
+	eng := core.NewEngine(newFakeStore(), fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "mem_stats",
+	})
+	if err != nil {
+		t.Fatalf("call mem_stats: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("mem_stats returned an error result: %+v", res.Content)
+	}
+}
+
 // TestMemDelete_StoreError returns an error result when the store fails.
 func TestMemDelete_StoreError(t *testing.T) {
 	st := newFakeStoreWithFail("Delete")
