@@ -2,7 +2,10 @@ package mcp_test
 
 import (
 	"context"
+	"fmt"
+	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -197,3 +200,426 @@ func TestMemWrite_RoundTrip(t *testing.T) {
 		t.Fatalf("mem_write returned an error result: %+v", res.Content)
 	}
 }
+
+// --- Phase 5: HTTPHandler (5.8) ---
+
+// TestHTTPHandler_ReturnsHandler confirms HTTPHandler returns a non-nil
+// http.Handler that can be used with httptest.Server.
+func TestHTTPHandler_ReturnsHandler(t *testing.T) {
+	eng := core.NewEngine(newFakeStore(), fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	h := a.HTTPHandler()
+	if h == nil {
+		t.Fatal("HTTPHandler returned nil")
+	}
+
+	// Verify the handler does not panic on a minimal request.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	h.ServeHTTP(rec, req)
+	// We do not assert status code here — streamable HTTP may return 405
+	// for GET. We only care that it does not panic or hang.
+}
+
+// TestHTTPHandler_PostRequest verifies the handler accepts POST requests
+// without panicking. The exact response depends on MCP transport negotiation.
+func TestHTTPHandler_PostRequest(t *testing.T) {
+	eng := core.NewEngine(newFakeStore(), fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	a.HTTPHandler().ServeHTTP(rec, req)
+	// Again: no status assertion — transport negotiation may vary.
+	// Just verify no panic.
+}
+
+// --- Phase 5: error-returning tool handlers (5.9) ---
+
+// TestMemRead_MissingNote returns an error result when reading a note
+// that does not exist.
+func TestMemRead_MissingNote(t *testing.T) {
+	eng := core.NewEngine(newFakeStore(), fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mem_read",
+		Arguments: map[string]any{"id": "nonexistent"},
+	})
+	if err != nil {
+		t.Fatalf("call mem_read: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result for missing note, got success")
+	}
+}
+
+// TestMemDelete_StoreError returns an error result when the store fails.
+func TestMemDelete_StoreError(t *testing.T) {
+	st := newFakeStoreWithFail("Delete")
+	eng := core.NewEngine(st, fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mem_delete",
+		Arguments: map[string]any{"id": "foo"},
+	})
+	if err != nil {
+		t.Fatalf("call mem_delete: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result for store failure, got success")
+	}
+}
+
+// TestMemSearch_StoreError returns an error result when Search fails.
+func TestMemSearch_StoreError(t *testing.T) {
+	st := newFakeStoreWithFail("SearchSemantic")
+	eng := core.NewEngine(st, fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mem_search",
+		Arguments: map[string]any{"query": "test"},
+	})
+	if err != nil {
+		t.Fatalf("call mem_search: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result for store failure, got success")
+	}
+}
+
+// TestMemList_StoreError returns an error result when List fails.
+func TestMemList_StoreError(t *testing.T) {
+	st := newFakeStoreWithFail("List")
+	eng := core.NewEngine(st, fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "mem_list",
+	})
+	if err != nil {
+		t.Fatalf("call mem_list: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result for store failure, got success")
+	}
+}
+
+// TestMemStats_StoreError returns an error result when Stats fails.
+func TestMemStats_StoreError(t *testing.T) {
+	st := newFakeStoreWithFail("Stats")
+	eng := core.NewEngine(st, fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "mem_stats",
+	})
+	if err != nil {
+		t.Fatalf("call mem_stats: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result for store failure, got success")
+	}
+}
+
+// TestMemLinks_StoreError returns an error result when Backlinks fails.
+func TestMemLinks_StoreError(t *testing.T) {
+	st := newFakeStoreWithFail("Backlinks")
+	eng := core.NewEngine(st, fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mem_links",
+		Arguments: map[string]any{"id": "foo"},
+	})
+	if err != nil {
+		t.Fatalf("call mem_links: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result for store failure, got success")
+	}
+}
+
+// TestMemSuggestLinks_StoreError returns an error result when SuggestLinks fails.
+func TestMemSuggestLinks_StoreError(t *testing.T) {
+	st := newFakeStoreWithFail("SearchSemantic")
+	eng := core.NewEngine(st, fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mem_suggest_links",
+		Arguments: map[string]any{"id": "foo"},
+	})
+	if err != nil {
+		t.Fatalf("call mem_suggest_links: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result for store failure, got success")
+	}
+}
+
+// TestMemPatch_StoreError returns an error result when Patch fails.
+// Patch calls Get then Write (which calls Upsert). We test the Upsert
+// failure path via TestMemWrite_StoreError since the store interface
+// does not distinguish between Write and Upsert.
+
+// TestMemWrite_StoreError returns an error result when Write fails.
+func TestMemWrite_StoreError(t *testing.T) {
+	st := newFakeStoreWithFail("Upsert")
+	eng := core.NewEngine(st, fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mem_write",
+		Arguments: map[string]any{"title": "FailNote", "body": "body"},
+	})
+	if err != nil {
+		t.Fatalf("call mem_write: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result for store failure, got success")
+	}
+}
+
+// TestMemSummarize_StoreError returns an error result when Summarize's Get fails.
+func TestMemSummarize_StoreError(t *testing.T) {
+	st := newFakeStoreWithFail("Get")
+	eng := core.NewEngine(st, fakeEmbedder{})
+	a := emcp.New(eng, nil)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	serverSession, err := a.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer func() { _ = serverSession.Close() }()
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer func() { _ = clientSession.Close() }()
+
+	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mem_summarize",
+		Arguments: map[string]any{"id": "foo"},
+	})
+	if err != nil {
+		t.Fatalf("call mem_summarize: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error result for store failure, got success")
+	}
+}
+
+// --- helper: fake store that can fail specific methods ---
+
+type fakeStoreWithFail struct {
+	fails map[string]bool
+	notes map[string]core.Note
+}
+
+func newFakeStoreWithFail(failMethod string) *fakeStoreWithFail {
+	s := &fakeStoreWithFail{
+		fails: map[string]bool{},
+		notes: map[string]core.Note{},
+	}
+	if failMethod != "" {
+		s.fails[failMethod] = true
+	}
+	return s
+}
+
+func (s *fakeStoreWithFail) Upsert(_ context.Context, n core.Note) error {
+	if s.fails["Upsert"] {
+		return fmt.Errorf("store error: Upsert")
+	}
+	s.notes[n.ID] = n
+	return nil
+}
+func (s *fakeStoreWithFail) Get(_ context.Context, id string) (*core.Note, error) {
+	if s.fails["Get"] {
+		return nil, fmt.Errorf("store error: Get")
+	}
+	if n, ok := s.notes[id]; ok {
+		return &n, nil
+	}
+	return nil, nil
+}
+func (s *fakeStoreWithFail) Delete(_ context.Context, id string) error {
+	if s.fails["Delete"] {
+		return fmt.Errorf("store error: Delete")
+	}
+	delete(s.notes, id)
+	return nil
+}
+func (s *fakeStoreWithFail) List(_ context.Context, _ string, _, _ int) ([]core.Note, error) {
+	if s.fails["List"] {
+		return nil, fmt.Errorf("store error: List")
+	}
+	return nil, nil
+}
+func (s *fakeStoreWithFail) Count(_ context.Context) (int, error) { return len(s.notes), nil }
+func (s *fakeStoreWithFail) MissingVectorIDs(_ context.Context) ([]string, error) {
+	if s.fails["MissingVectorIDs"] {
+		return nil, fmt.Errorf("store error: MissingVectorIDs")
+	}
+	return nil, nil
+}
+func (s *fakeStoreWithFail) Stats(_ context.Context) (core.Stats, error) {
+	if s.fails["Stats"] {
+		return core.Stats{}, fmt.Errorf("store error: Stats")
+	}
+	return core.Stats{TotalNotes: len(s.notes)}, nil
+}
+func (s *fakeStoreWithFail) SearchSemantic(_ context.Context, _ string, _ []float32, _ int) ([]core.SearchHit, error) {
+	if s.fails["SearchSemantic"] {
+		return nil, fmt.Errorf("store error: SearchSemantic")
+	}
+	return nil, nil
+}
+func (s *fakeStoreWithFail) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
+	return nil, nil
+}
+func (s *fakeStoreWithFail) Backlinks(_ context.Context, _ string) ([]core.Backlink, error) {
+	if s.fails["Backlinks"] {
+		return nil, fmt.Errorf("store error: Backlinks")
+	}
+	return nil, nil
+}
+func (s *fakeStoreWithFail) Close() error { return nil }
