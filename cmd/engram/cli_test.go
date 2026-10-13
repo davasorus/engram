@@ -225,3 +225,217 @@ func TestIsCLICommand(t *testing.T) {
 		}
 	}
 }
+
+// --- Flag parse error paths ---
+
+func TestCLI_Search_FlagParseError(t *testing.T) {
+	out, code := runCLIForTest(t, []string{"search", "-bogus", "query"})
+	if code != 2 {
+		t.Fatalf("expected exit 2 for unknown flag, got %d", code)
+	}
+	if out != "" {
+		t.Fatalf("expected empty stdout (flag errors go to stderr), got: %s", out)
+	}
+}
+
+func TestCLI_Search_MissingQuery(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"search"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for missing query, got %d", code)
+	}
+	if !strings.Contains(out, "usage: engram search") {
+		t.Fatalf("expected usage message, got: %s", out)
+	}
+}
+
+func TestCLI_List_FlagParseError(t *testing.T) {
+	out, code := runCLIForTest(t, []string{"list", "-bogus"})
+	if code != 2 {
+		t.Fatalf("expected exit 2 for unknown flag, got %d", code)
+	}
+	if out != "" {
+		t.Fatalf("expected empty stdout (flag errors go to stderr), got: %s", out)
+	}
+}
+
+func TestCLI_Get_FlagParseError(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"get", "-bogus"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for unknown flag, got %d", code)
+	}
+	if out != "" {
+		t.Fatalf("expected empty stdout (flag errors go to stderr), got: %s", out)
+	}
+}
+
+func TestCLI_Get_MissingID(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"get"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for missing ID, got %d", code)
+	}
+	if !strings.Contains(out, "usage: engram get") {
+		t.Fatalf("expected usage message, got: %s", out)
+	}
+}
+
+func TestCLI_Write_MissingTitle(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"write"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for missing title, got %d", code)
+	}
+	if !strings.Contains(out, "usage: engram write") {
+		t.Fatalf("expected usage message, got: %s", out)
+	}
+}
+
+func TestCLI_Write_BodyFileError(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"write", "-title", "Test", "-body-file", "/nonexistent/path"}, sa...))
+	if code != 1 {
+		t.Fatalf("expected exit 1 for file read error, got %d", code)
+	}
+	if !strings.Contains(out, "error:") {
+		t.Fatalf("expected error message, got: %s", out)
+	}
+}
+
+func TestCLI_Patch_FlagParseError(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"patch", "-bogus", "n1"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for unknown flag, got %d", code)
+	}
+	if out != "" {
+		t.Fatalf("expected empty stdout (flag errors go to stderr), got: %s", out)
+	}
+}
+
+func TestCLI_Patch_MissingOld(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"patch", "n1"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for missing -old, got %d", code)
+	}
+	if !strings.Contains(out, "usage: engram patch") {
+		t.Fatalf("expected usage message, got: %s", out)
+	}
+}
+
+func TestCLI_Patch_MissingID(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"patch", "-old", "x"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for missing ID, got %d", code)
+	}
+	if !strings.Contains(out, "usage: engram patch") {
+		t.Fatalf("expected usage message, got: %s", out)
+	}
+}
+
+func TestCLI_Delete_FlagParseError(t *testing.T) {
+	out, code := runCLIForTest(t, []string{"delete", "-bogus", "id"})
+	if code != 2 {
+		t.Fatalf("expected exit 2 for unknown flag, got %d", code)
+	}
+	if out != "" {
+		t.Fatalf("expected empty stdout (flag errors go to stderr), got: %s", out)
+	}
+}
+
+func TestCLI_Delete_MissingID(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"delete"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for missing ID, got %d", code)
+	}
+	if !strings.Contains(out, "usage: engram delete") {
+		t.Fatalf("expected usage message, got: %s", out)
+	}
+}
+
+func TestCLI_Links_FlagParseError(t *testing.T) {
+	out, code := runCLIForTest(t, []string{"links", "-bogus", "id"})
+	if code != 2 {
+		t.Fatalf("expected exit 2 for unknown flag, got %d", code)
+	}
+	if out != "" {
+		t.Fatalf("expected empty stdout (flag errors go to stderr), got: %s", out)
+	}
+}
+
+func TestCLI_Links_MissingID(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"links"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for missing ID, got %d", code)
+	}
+	if !strings.Contains(out, "usage: engram links") {
+		t.Fatalf("expected usage message, got: %s", out)
+	}
+}
+
+func TestCLI_Suggest_FlagParseError(t *testing.T) {
+	out, code := runCLIForTest(t, []string{"suggest", "-bogus", "id"})
+	if code != 2 {
+		t.Fatalf("expected exit 2 for unknown flag, got %d", code)
+	}
+	if out != "" {
+		t.Fatalf("expected empty stdout (flag errors go to stderr), got: %s", out)
+	}
+}
+
+func TestCLI_Suggest_MissingID(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"suggest"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for missing ID, got %d", code)
+	}
+	if !strings.Contains(out, "usage: engram suggest") {
+		t.Fatalf("expected usage message, got: %s", out)
+	}
+}
+
+func TestCLI_Summary_FlagParseError(t *testing.T) {
+	out, code := runCLIForTest(t, []string{"summary", "-bogus", "id"})
+	if code != 2 {
+		t.Fatalf("expected exit 2 for unknown flag, got %d", code)
+	}
+	if out != "" {
+		t.Fatalf("expected empty stdout (flag errors go to stderr), got: %s", out)
+	}
+}
+
+func TestCLI_Summary_MissingID(t *testing.T) {
+	_, sa := newTestServer(t)
+	out, code := runCLIForTest(t, append([]string{"summary"}, sa...))
+	if code != 2 {
+		t.Fatalf("expected exit 2 for missing ID, got %d", code)
+	}
+	if !strings.Contains(out, "usage: engram summary") {
+		t.Fatalf("expected usage message, got: %s", out)
+	}
+}
+
+func TestCLI_Reembed_FlagParseError(t *testing.T) {
+	out, code := runCLIForTest(t, []string{"reembed", "-bogus"})
+	if code != 2 {
+		t.Fatalf("expected exit 2 for unknown flag, got %d", code)
+	}
+	if out != "" {
+		t.Fatalf("expected empty stdout (flag errors go to stderr), got: %s", out)
+	}
+}
+
+func TestCLI_Stats_FlagParseError(t *testing.T) {
+	out, code := runCLIForTest(t, []string{"stats", "-bogus"})
+	if code != 2 {
+		t.Fatalf("expected exit 2 for unknown flag, got %d", code)
+	}
+	if out != "" {
+		t.Fatalf("expected empty stdout (flag errors go to stderr), got: %s", out)
+	}
+}
