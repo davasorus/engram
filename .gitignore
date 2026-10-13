@@ -10,3 +10,5 @@ compose/.env
 node_modules/
 
 *.bak
+# test output files
+*.out
