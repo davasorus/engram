@@ -33,6 +33,13 @@ func (m *memStore) List(_ context.Context, _ string, limit, offset int) ([]core.
 	for _, n := range m.notes {
 		out = append(out, n)
 	}
+	if offset > len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 func (m *memStore) Count(_ context.Context) (int, error) { return len(m.notes), nil }
