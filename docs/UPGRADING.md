@@ -20,7 +20,7 @@ by `ENGRAM_VERSION`.
 cd compose
 
 # 1. Point at the new version.
-$EDITOR .env            # set ENGRAM_VERSION=X.Y.Z  (pin it; don't ride :latest)
+${EDITOR} .env            # set ENGRAM_VERSION=X.Y.Z  (pin it; don't ride :latest)
 
 # 2. Pull the new engram and engram-migrate images.
 podman-compose -f compose.yml pull

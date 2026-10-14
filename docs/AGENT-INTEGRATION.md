@@ -5,12 +5,22 @@ exact config and prompt blocks to add to the agent. Do these steps in
 order. Each step proves one layer, so a later failure can only come from
 the newest layer.
 
+## Memory Management
+
+Follow these rules when writing notes to engram.
+
+- Start every note name with the repository name.
+- Add the repository name as a tag for each note.
+- Use the `source:agent` tag to mark agent-written notes.
+- Keep titles short. Use noun phrases.
+- Include 1 to 3 topical tags per note.
+- Use `[[wikilinks]]` in bodies to connect related notes.
+
 ## 0. Prerequisites (once)
 
-- LM Studio (Windows) has the model `text-embedding-nomic-embed-text-v1.5`
-  downloaded. JIT model loading works; the first embed call loads the
-  model. The model has 768 dimensions, which matches the `ENGRAM_DIMS`
-  default.
+- An embedding model that supports 768-dimensional output (for example,
+  nomic-embed-text-v1.5). The model must be reachable at the URL set in
+  `ENGRAM_EMBED_URL`.
 - Enable Dependabot alerts and security updates in the GitHub repository
   settings.
 

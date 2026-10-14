@@ -9,43 +9,16 @@ engram is a memory service for AI agents. It stores markdown notes as data in a 
 - `internal/mcp`: This package provides the Model Context Protocol interface.
 - `internal/rest`: This package provides the REST API.
 - `internal/web`: This package serves the web user interface.
+- `internal/complete`: This package provides the completion (summarization) client.
+- `internal/cliclient`: This package provides the CLI REST client for the agent.
 - `compose/`: This directory contains Docker Compose files.
 - `kube/`: This directory contains Kubernetes configuration files.
 
 # Build and Test
-Run `go test ./...` to run unit tests.
-Run `go test -tags=integration ./internal/store/...` for integration tests.
-Run `golangci-lint run` to check code quality.
-Run `gofmt -l .` to verify code formatting.
+See [README.md](README.md) for build and test commands.
 
 # Code Conventions
-Follow standard Go coding styles.
-Use the core interfaces in `internal/core`.
-Keep internal logic within the `internal` directory.
-Ensure consistency between the REST and MCP implementations.
-Match all data structures with the definitions in `inner/core`.
+See [README.md](README.md) for code conventions.
 
 # Commit Messages
-Use Conventional Commits for all changes.
-Follow the format "type(scope): description".
-Use types: feat, fix, docs, style, refactor, perf, test, build, ci, chore.
-Use imperative mood for descriptions.
-Keep the subject under 72 characters.
-Add a body for complex changes.
-Use an exclamation point after type/scope to mark breaking changes.
-
-# Documentation Language
-Write all documentation in ASD-STE100 Simplified Technical English.
-Use active voice.
-Use simple verb tenses.
-Write one instruction per sentence.
-Keep sentences under 25 words.
-Use one term for one thing.
-Do not use vague words.
-Do not use -ing forms.
-Keep paragraphs to one topic.
-Limit each paragraph to six sentences.
-
-# Memory Management
-Start every note name with the repository name.
-Add the repository name as a tag for each note.
+See [README.md](README.md) for commit message conventions.
