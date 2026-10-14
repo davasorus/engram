@@ -35,8 +35,11 @@ func (s *fakeStore) Delete(_ context.Context, id string) error {
 	return nil
 }
 func (s *fakeStore) List(_ context.Context, _ string, _, _ int) ([]core.Note, error) { return nil, nil }
-func (s *fakeStore) Count(_ context.Context) (int, error)                            { return len(s.notes), nil }
-func (s *fakeStore) MissingVectorIDs(_ context.Context) ([]string, error)            { return nil, nil }
+func (s *fakeStore) ListAfter(_ context.Context, _ string, _ int) ([]core.Note, error) {
+	return nil, nil
+}
+func (s *fakeStore) Count(_ context.Context) (int, error)                 { return len(s.notes), nil }
+func (s *fakeStore) MissingVectorIDs(_ context.Context) ([]string, error) { return nil, nil }
 func (s *fakeStore) Stats(_ context.Context) (core.Stats, error) {
 	return core.Stats{TotalNotes: len(s.notes)}, nil
 }
@@ -711,6 +714,12 @@ func (s *fakeStoreWithFail) Delete(_ context.Context, id string) error {
 	return nil
 }
 func (s *fakeStoreWithFail) List(_ context.Context, _ string, _, _ int) ([]core.Note, error) {
+	if s.fails["List"] {
+		return nil, fmt.Errorf("store error: List")
+	}
+	return nil, nil
+}
+func (s *fakeStoreWithFail) ListAfter(_ context.Context, _ string, _ int) ([]core.Note, error) {
 	if s.fails["List"] {
 		return nil, fmt.Errorf("store error: List")
 	}

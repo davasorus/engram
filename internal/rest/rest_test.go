@@ -75,6 +75,22 @@ func (m *memStore) List(_ context.Context, project string, limit, offset int) ([
 	}
 	return out, nil
 }
+func (m *memStore) ListAfter(_ context.Context, afterID string, limit int) ([]core.Note, error) {
+	if m.fail["List"] {
+		return nil, fmt.Errorf("store error: List")
+	}
+	var out []core.Note
+	for _, n := range m.notes {
+		if n.ID > afterID {
+			out = append(out, n)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
 func (m *memStore) Count(_ context.Context) (int, error) {
 	if m.fail["Count"] {
 		return 0, fmt.Errorf("store error: Count")

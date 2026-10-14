@@ -61,9 +61,16 @@ func runCLI(ctx context.Context, out io.Writer, args []string) int {
 // returns a func to read its resolved value (flag wins, then
 // ENGRAM_CLI_SERVER, then a localhost default).
 func cliServerFlag(fs *flag.FlagSet) func() string {
-	def := env("ENGRAM_CLI_SERVER", "http://localhost:8088")
+	def := cliEnv("ENGRAM_CLI_SERVER", "http://localhost:8088")
 	v := fs.String("server", def, "engram server base URL")
 	return func() string { return *v }
+}
+
+func cliEnv(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
 }
 
 func cliPrintJSON(out io.Writer, v any) int {

@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"context"
+	"fmt"
 	"hash/fnv"
 	"math"
 	"sort"
@@ -42,6 +43,21 @@ func (m *memStore) List(_ context.Context, _ string, limit, offset int) ([]core.
 	}
 	return out, nil
 }
+
+func (m *memStore) ListAfter(_ context.Context, afterID string, limit int) ([]core.Note, error) {
+	var out []core.Note
+	for _, n := range m.notes {
+		if n.ID > afterID {
+			out = append(out, n)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (m *memStore) Count(_ context.Context) (int, error) { return len(m.notes), nil }
 func (m *memStore) MissingVectorIDs(_ context.Context) ([]string, error) {
 	var ids []string
@@ -371,4 +387,224 @@ func TestBacklinks(t *testing.T) {
 	if len(bl) != 1 || bl[0].Title != "Source" {
 		t.Fatalf("backlinks: %+v", bl)
 	}
+}
+
+// --- validate.go coverage ---------------------------------------------------
+
+func TestIsNotConfigured(t *testing.T) {
+	if !core.IsNotConfigured(core.ErrNotConfigured) {
+		t.Fatal("expected true for ErrNotConfigured")
+	}
+	if core.IsNotConfigured(core.ErrNotFound) {
+		t.Fatal("expected false for ErrNotFound")
+	}
+	if core.IsNotConfigured(nil) {
+		t.Fatal("expected false for nil")
+	}
+}
+
+func TestIsNotFound(t *testing.T) {
+	if !core.IsNotFound(core.ErrNotFound) {
+		t.Fatal("expected true for ErrNotFound")
+	}
+	if core.IsNotFound(core.ErrInvalidInput) {
+		t.Fatal("expected false for ErrInvalidInput")
+	}
+}
+
+func TestIsInvalidInput(t *testing.T) {
+	if !core.IsInvalidInput(core.ErrInvalidInput) {
+		t.Fatal("expected true for ErrInvalidInput")
+	}
+	if core.IsInvalidInput(core.ErrNotFound) {
+		t.Fatal("expected false for ErrNotFound")
+	}
+}
+
+func TestValidateID(t *testing.T) {
+	// Use the public Engine.Read path which calls validateID internally.
+	e := newEngine(t)
+	ctx := context.Background()
+
+	for _, bad := range []string{"", "  ", "bad path/..", "bad..path", " spaces ", "a:colon", "a@b"} {
+		_, err := e.Read(ctx, bad)
+		if err == nil {
+			t.Fatalf("expected error for id %q", bad)
+		}
+		if !core.IsInvalidInput(err) {
+			t.Fatalf("expected InvalidInput for %q, got %v", bad, err)
+		}
+	}
+
+	// Valid IDs must not error.
+	for _, good := range []string{"hello", "hello-world", "hello.world", "a/b", "a/b/c", "a1_b2-c3"} {
+		_, err := e.Read(ctx, good)
+		if err == nil {
+			continue // note not found is fine — validation passed
+		}
+		if core.IsInvalidInput(err) {
+			t.Fatalf("validateID rejected valid id %q", good)
+		}
+	}
+}
+
+func TestValidateWriteInput(t *testing.T) {
+	e := newEngine(t)
+	ctx := context.Background()
+
+	// Empty title must fail validation.
+	_, err := e.Write(ctx, core.WriteInput{Title: "", Body: "content"})
+	if err == nil {
+		t.Fatal("expected error for empty title")
+	}
+	if !core.IsInvalidInput(err) {
+		t.Fatalf("expected InvalidInput, got %v", err)
+	}
+
+	// Empty body is valid.
+	n, err := e.Write(ctx, core.WriteInput{Title: "Valid"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n.Title != "Valid" {
+		t.Fatal("expected title to be stored")
+	}
+
+	// Too many tags.
+	tags := make([]string, 33)
+	for i := range tags {
+		tags[i] = fmt.Sprintf("tag%d", i)
+	}
+	_, err = e.Write(ctx, core.WriteInput{Title: "Too Many Tags", Tags: tags})
+	if err == nil {
+		t.Fatal("expected error for too many tags")
+	}
+	if !core.IsInvalidInput(err) {
+		t.Fatalf("expected InvalidInput, got %v", err)
+	}
+
+	// Empty tag.
+	_, err = e.Write(ctx, core.WriteInput{Title: "Empty Tag", Tags: []string{"ok", ""}})
+	if err == nil {
+		t.Fatal("expected error for empty tag")
+	}
+
+	// Invalid project ID.
+	_, err = e.Write(ctx, core.WriteInput{Title: "Bad Project", Project: "bad..path"})
+	if err == nil {
+		t.Fatal("expected error for invalid project")
+	}
+}
+
+func TestClampOffset(t *testing.T) {
+	e := newEngine(t)
+	ctx := context.Background()
+	// Negative offset should be clamped to 0 (no error).
+	notes, err := e.List(ctx, "", 10, -5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if notes == nil && len(notes) != 0 {
+		t.Fatal("expected empty or nil slice")
+	}
+}
+
+func TestCount(t *testing.T) {
+	e := newEngine(t)
+	ctx := context.Background()
+
+	n, err := e.Count(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected 0 notes, got %d", n)
+	}
+
+	_, _ = e.Write(ctx, core.WriteInput{Title: "A"})
+	_, _ = e.Write(ctx, core.WriteInput{Title: "B"})
+	n, err = e.Count(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 notes, got %d", n)
+	}
+}
+
+func TestStats(t *testing.T) {
+	m := newMem()
+	e := core.NewEngine(m, fakeEmbedder{})
+	ctx := context.Background()
+
+	_, _ = e.Write(ctx, core.WriteInput{Title: "Note A", Body: "see [[Note B]]"})
+	_, _ = e.Write(ctx, core.WriteInput{Title: "Note B", Body: "content"})
+
+	s, err := e.Stats(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.TotalNotes != 2 {
+		t.Fatalf("expected 2 total notes, got %d", s.TotalNotes)
+	}
+	if s.TotalLinks != 1 {
+		t.Fatalf("expected 1 total link, got %d", s.TotalLinks)
+	}
+	// Both notes have vectors from fakeEmbedder, so NotesMissingVector should be 0.
+	if s.NotesMissingVector != 0 {
+		t.Fatalf("expected 0 notes missing vector, got %d", s.NotesMissingVector)
+	}
+
+	// Now manually insert a note without a vector and re-check.
+	m.notes["no-vec"] = core.Note{ID: "no-vec", Title: "No Vec", Body: "no vector"}
+	s2, err := e.Stats(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s2.NotesMissingVector != 1 {
+		t.Fatalf("expected 1 note missing vector, got %d", s2.NotesMissingVector)
+	}
+}
+
+func TestSummarize(t *testing.T) {
+	m := newMem()
+	ctx := context.Background()
+
+	// No summarizer configured → ErrNotConfigured.
+	e := core.NewEngine(m, fakeEmbedder{})
+	_, err := e.Summarize(ctx, "any-note")
+	if !core.IsNotConfigured(err) {
+		t.Fatalf("expected IsNotConfigured, got %v", err)
+	}
+
+	// Write a note and attach a fake summarizer.
+	fakeSum := &fakeSummarizer{text: "This is the summary"}
+	e2 := core.NewEngine(m, fakeEmbedder{}).WithSummarizer(fakeSum)
+	_, err = e2.Write(ctx, core.WriteInput{Title: "Summarize Me", Body: "Some content to summarize"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := e2.Summarize(ctx, "summarize-me")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if summary != "This is the summary" {
+		t.Fatalf("expected summary, got %q", summary)
+	}
+
+	// Non-existent note → not found.
+	_, err = e2.Summarize(ctx, "no-such-note")
+	if !core.IsNotFound(err) {
+		t.Fatalf("expected IsNotFound, got %v", err)
+	}
+}
+
+// fakeSummarizer implements core.Summarizer for testing.
+type fakeSummarizer struct {
+	text string
+}
+
+func (f *fakeSummarizer) Configured() bool { return true }
+func (f *fakeSummarizer) Complete(_ context.Context, prompt string) (string, error) {
+	return f.text, nil
 }

@@ -37,6 +37,12 @@ func (m *ms) List(context.Context, string, int, int) ([]core.Note, error) {
 	}
 	return out, nil
 }
+func (m *ms) ListAfter(context.Context, string, int) ([]core.Note, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return nil, nil
+}
 func (m *ms) Count(context.Context) (int, error) {
 	if m.err != nil {
 		return 0, m.err

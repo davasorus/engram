@@ -241,6 +241,26 @@ func (p *Postgres) List(ctx context.Context, project string, limit, offset int) 
 	return p.scanMany(rows)
 }
 
+// ListAfter returns up to `limit` notes whose ID is lexicographically greater
+// than `afterID`, ordered by ID asc. It is used for cursor-based pagination
+// in bulk operations (e.g. reembedAll) so that concurrent writes cannot cause
+// records to be skipped or double-processed.
+func (p *Postgres) ListAfter(ctx context.Context, afterID string, limit int) ([]core.Note, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := p.pool.Query(ctx, `
+SELECT id,COALESCE(project,'') AS project,title,body,frontmatter,tags,content_hash,created,updated
+FROM notes
+WHERE id > $1
+ORDER BY id ASC
+LIMIT $2`, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return p.scanMany(rows)
+}
+
 func (p *Postgres) scanMany(rows pgx.Rows) ([]core.Note, error) {
 	defer rows.Close()
 	var out []core.Note
@@ -397,7 +417,7 @@ SELECT id,COALESCE(project,'') AS project,title,body,frontmatter,tags,content_ha
 FROM notes
 WHERE (to_tsvector('english', title || ' ' || body) @@ plainto_tsquery('english', $1)
    OR lower(title) LIKE '%' || lower($1) || '%') AND project=$3
-ORDER BY updated DESC
+ORDER BY ts_rank(to_tsvector('english', title || ' ' || body), plainto_tsquery('english', $1)) DESC
 LIMIT $2`, q, limit, project)
 	} else {
 		rows, err = p.pool.Query(ctx, `
@@ -405,7 +425,7 @@ SELECT id,COALESCE(project,'') AS project,title,body,frontmatter,tags,content_ha
 FROM notes
 WHERE to_tsvector('english', title || ' ' || body) @@ plainto_tsquery('english', $1)
    OR lower(title) LIKE '%' || lower($1) || '%'
-ORDER BY updated DESC
+ORDER BY ts_rank(to_tsvector('english', title || ' ' || body), plainto_tsquery('english', $1)) DESC
 LIMIT $2`, q, limit)
 	}
 	if err != nil {

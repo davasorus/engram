@@ -42,6 +42,18 @@ func (m *memStore) List(_ context.Context, _ string, limit, offset int) ([]core.
 	}
 	return out, nil
 }
+func (m *memStore) ListAfter(_ context.Context, afterID string, limit int) ([]core.Note, error) {
+	var out []core.Note
+	for _, n := range m.notes {
+		if n.ID > afterID {
+			out = append(out, n)
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
 func (m *memStore) Count(_ context.Context) (int, error) { return len(m.notes), nil }
 func (m *memStore) MissingVectorIDs(_ context.Context) ([]string, error) {
 	var ids []string

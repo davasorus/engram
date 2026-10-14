@@ -73,6 +73,12 @@ type Store interface {
 	// non-empty, only notes in that project are returned.
 	List(ctx context.Context, project string, limit, offset int) ([]Note, error)
 
+	// ListAfter returns up to `limit` notes whose ID is lexicographically
+	// greater than `afterID`, ordered by ID asc. It is used for cursor-based
+	// pagination in bulk operations (e.g. reembedAll) so that concurrent
+	// writes cannot cause records to be skipped or double-processed.
+	ListAfter(ctx context.Context, afterID string, limit int) ([]Note, error)
+
 	// Count returns the total number of notes.
 	Count(ctx context.Context) (int, error)
 

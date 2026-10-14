@@ -19,6 +19,9 @@ func (bs) Delete(context.Context, string) error { return nil }
 func (bs) List(_ context.Context, _ string, _, _ int) ([]core.Note, error) {
 	return []core.Note{{ID: "n1", Project: "engram", Title: "N1", Body: "b"}}, nil
 }
+func (bs) ListAfter(context.Context, string, int) ([]core.Note, error) {
+	return nil, nil
+}
 func (bs) Count(context.Context) (int, error)                 { return 1, nil }
 func (bs) MissingVectorIDs(context.Context) ([]string, error) { return nil, nil }
 func (bs) Stats(context.Context) (core.Stats, error)          { return core.Stats{TotalNotes: 1}, nil }

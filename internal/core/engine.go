@@ -323,8 +323,9 @@ func (e *Engine) SuggestLinks(ctx context.Context, id string, limit int) ([]Sear
 
 	// Fetch extra candidates: the note itself and any note it already links
 	// to both get filtered out below, so ask for more than limit up front.
+	// Scope to the note's project so suggestions stay within the same scope.
 	fetchLimit := clampLimit(limit+len(n.Links)+1, DefaultSearchLimit, MaxSearchLimit)
-	hits, err := e.store.SearchSemantic(ctx, "", vec, fetchLimit)
+	hits, err := e.store.SearchSemantic(ctx, n.Project, vec, fetchLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -401,12 +402,12 @@ func (e *Engine) Reembed(ctx context.Context, full bool) (int, error) {
 
 func (e *Engine) reembedAll(ctx context.Context) (int, error) {
 	var n int
-	offset := 0
+	var afterID string
 	for {
 		if err := ctx.Err(); err != nil {
 			return n, err
 		}
-		batch, err := e.store.List(ctx, "", 100, offset)
+		batch, err := e.store.ListAfter(ctx, afterID, 100)
 		if err != nil {
 			return n, err
 		}
@@ -419,7 +420,7 @@ func (e *Engine) reembedAll(ctx context.Context) (int, error) {
 			}
 			n++
 		}
-		offset += len(batch)
+		afterID = batch[len(batch)-1].ID
 	}
 	return n, nil
 }
