@@ -63,8 +63,9 @@ podman-compose -f compose.yml up -d  # pulls engram + engram-migrate from GHCR
 # REST: http://localhost:8088/api/
 ```
 
-`ENGRAM_DIMS` must match the output width of your embedding model
-(nomic-embed-text-v1.5 = 768).
+`ENGRAM_DIMS` is app-side only. It does not resize the DB column. The
+dimension is hardcoded as `vector(768)` in the migration changelog.
+`ENGRAM_DIMS` must match 768. A mismatch breaks the service.
 
 ## Quick start (Kubernetes-shaped)
 
@@ -104,6 +105,10 @@ flags, engram returns 501 for summary requests.
   engram search -kind hybrid "postgres migrations"
   engram write -title "Meeting notes" -body-file notes.md
   engram get meeting-notes
+  engram list
+  engram patch meeting-notes -title "Updated title"
+  engram summary meeting-notes
+  engram reembed
   engram links meeting-notes
   engram suggest meeting-notes
   engram delete meeting-notes
@@ -130,6 +135,8 @@ flags, engram returns 501 for summary requests.
 | `internal/mcp` | MCP adapter |
 | `internal/rest` | REST adapter |
 | `internal/web` | web UI and markdown rendering |
+| `internal/complete` | completion (summarization) client |
+| `internal/cliclient` | CLI REST client for the agent |
 | `compose/`, `kube/` | the declared container stack |
 
 ## Notes
