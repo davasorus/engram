@@ -434,7 +434,7 @@ LIMIT $2`, q, limit)
 	return p.scanMany(rows)
 }
 
-func (p *Postgres) Backlinks(ctx context.Context, idOrTitle string) ([]core.Backlink, error) {
+func (p *Postgres) Backlinks(ctx context.Context, idOrTitle, _ string) ([]core.Backlink, error) {
 	key := strings.ToLower(strings.TrimSpace(idOrTitle))
 	rows, err := p.pool.Query(ctx, `
 SELECT n.id, n.title FROM links l

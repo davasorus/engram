@@ -5,6 +5,8 @@ package rest
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -91,7 +93,7 @@ func (a *API) write(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var b writeBody
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
-		writeErr(w, http.StatusBadRequest, bodyDecodeErr(err))
+		writeErr(w, http.StatusBadRequest, bodyDecodeErr(wrapMaxBytesError(err)))
 		return
 	}
 	n, err := a.eng.Write(r.Context(), core.WriteInput{ID: b.ID, Project: b.Project, Title: b.Title, Body: b.Body, Tags: b.Tags})
@@ -124,7 +126,7 @@ func (a *API) patch(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var b patchBody
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
-		writeErr(w, http.StatusBadRequest, bodyDecodeErr(err))
+		writeErr(w, http.StatusBadRequest, bodyDecodeErr(wrapMaxBytesError(err)))
 		return
 	}
 	n, err := a.eng.Patch(r.Context(), r.PathValue("id"), b.OldStr, b.NewStr)
@@ -144,7 +146,7 @@ func (a *API) delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) links(w http.ResponseWriter, r *http.Request) {
-	bl, err := a.eng.Backlinks(r.Context(), r.PathValue("id"))
+	bl, err := a.eng.Backlinks(r.Context(), r.PathValue("id"), "")
 	if err != nil {
 		writeEngErr(w, err)
 		return
@@ -220,11 +222,26 @@ func writeEngErr(w http.ResponseWriter, err error) {
 	}
 }
 
+// errBodyTooLarge is the sentinel error for request bodies that exceed
+// maxBodyBytes. Handlers use errors.Is to distinguish it from generic JSON
+// decode errors, avoiding fragile string comparison.
+var errBodyTooLarge = errors.New("http: request body too large")
+
+// wrapMaxBytesError wraps the error returned by http.MaxBytesReader so that
+// errors.Is(err, errBodyTooLarge) succeeds. http.MaxBytesReader returns an
+// unexported error type, so we detect it by message prefix and wrap it.
+func wrapMaxBytesError(err error) error {
+	if err != nil && strings.HasPrefix(err.Error(), "http: request body too large") {
+		return fmt.Errorf("%w: %s", errBodyTooLarge, err.Error())
+	}
+	return err
+}
+
 // bodyDecodeErr turns a JSON-decode error into a client-facing message. A
 // request that was rejected for exceeding maxBodyBytes gets a specific
 // message instead of a generic "invalid JSON body".
 func bodyDecodeErr(err error) string {
-	if err.Error() == "http: request body too large" {
+	if errors.Is(err, errBodyTooLarge) {
 		return "request body too large"
 	}
 	return "invalid JSON body"

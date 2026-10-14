@@ -39,6 +39,12 @@ func toVMs(hits []core.SearchHit) []SearchVM {
 	return out
 }
 
+// maxRRFScore is the theoretical maximum RRF score when a note ranks #1 in
+// both the semantic and keyword candidate lists. Two lists with k=60 top out
+// at 2/(60+1) ≈ 0.0328. We use 0.033 as a safe upper bound for normalizing
+// hybrid scores to a 0..100 percentage bar.
+const maxRRFScore = 0.033
+
 // strengthPct maps a score to a 0..100 bar width. Keyword hits are exact
 // matches (score 1.0) so they read as full strength. Semantic cosine scores
 // in practice cluster in ~0.3..0.8; we stretch that range so the bar is
@@ -50,7 +56,7 @@ func strengthPct(score float64, kind string) int {
 	case "hybrid":
 		// RRF scores from two 60-constant lists top out near 2/61 (~0.033)
 		// when a note ranks #1 in both lists. Map 0 -> 0%, 0.033 -> 100%.
-		p := score / 0.033 * 100
+		p := score / maxRRFScore * 100
 		if p < 0 {
 			p = 0
 		}

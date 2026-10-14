@@ -164,11 +164,11 @@ func (e *Engine) Count(ctx context.Context) (int, error) {
 	return e.store.Count(ctx)
 }
 
-func (e *Engine) Backlinks(ctx context.Context, idOrTitle string) ([]Backlink, error) {
+func (e *Engine) Backlinks(ctx context.Context, idOrTitle, title string) ([]Backlink, error) {
 	if strings.TrimSpace(idOrTitle) == "" {
 		return nil, invalidf("id is required")
 	}
-	return e.store.Backlinks(ctx, idOrTitle)
+	return e.store.Backlinks(ctx, idOrTitle, title)
 }
 
 // Stats returns summary counts over the whole memory store, for the

@@ -92,7 +92,7 @@ func (m *memStore) KeywordSearch(_ context.Context, _ string, q string, limit in
 	}
 	return out, nil
 }
-func (m *memStore) Backlinks(_ context.Context, idOrTitle string) ([]core.Backlink, error) {
+func (m *memStore) Backlinks(_ context.Context, idOrTitle string, _ string) ([]core.Backlink, error) {
 	key := strings.ToLower(strings.TrimSpace(idOrTitle))
 	var title string
 	if n, ok := m.notes[idOrTitle]; ok {

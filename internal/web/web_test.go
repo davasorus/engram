@@ -68,8 +68,8 @@ func (m *ms) KeywordSearch(context.Context, string, string, int) ([]core.Note, e
 	}
 	return nil, nil
 }
-func (m *ms) Backlinks(context.Context, string) ([]core.Backlink, error) { return nil, nil }
-func (m *ms) Close() error                                               { return nil }
+func (m *ms) Backlinks(context.Context, string, string) ([]core.Backlink, error) { return nil, nil }
+func (m *ms) Close() error                                                       { return nil }
 
 // --- mock embedder ------------------------------------------------------------
 

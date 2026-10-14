@@ -31,8 +31,8 @@ func (bs) SearchSemantic(_ context.Context, _ string, _ []float32, _ int) ([]cor
 func (bs) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
 	return nil, nil
 }
-func (bs) Backlinks(context.Context, string) ([]core.Backlink, error) { return nil, nil }
-func (bs) Close() error                                               { return nil }
+func (bs) Backlinks(context.Context, string, string) ([]core.Backlink, error) { return nil, nil }
+func (bs) Close() error                                                       { return nil }
 
 type be struct{}
 

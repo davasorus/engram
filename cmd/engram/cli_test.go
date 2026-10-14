@@ -83,8 +83,10 @@ func (m *memStore) KeywordSearch(_ context.Context, _ string, q string, _ int) (
 	}
 	return out, nil
 }
-func (m *memStore) Backlinks(_ context.Context, _ string) ([]core.Backlink, error) { return nil, nil }
-func (m *memStore) Close() error                                                   { return nil }
+func (m *memStore) Backlinks(_ context.Context, _ string, _ string) ([]core.Backlink, error) {
+	return nil, nil
+}
+func (m *memStore) Close() error { return nil }
 
 type fakeEmbedder struct{}
 

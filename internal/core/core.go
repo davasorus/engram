@@ -98,7 +98,9 @@ type Store interface {
 	KeywordSearch(ctx context.Context, project, q string, limit int) ([]Note, error)
 
 	// Backlinks returns notes whose Links contain the given id/title.
-	Backlinks(ctx context.Context, idOrTitle string) ([]Backlink, error)
+	// When title is non-empty, it is used as an additional search hint for
+	// disambiguation (e.g. when multiple notes share the same slug).
+	Backlinks(ctx context.Context, idOrTitle, title string) ([]Backlink, error)
 
 	// Stats returns summary counts over the whole store: notes, projects,
 	// links, notes missing a vector, and recent-activity volume.

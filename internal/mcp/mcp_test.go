@@ -49,7 +49,7 @@ func (s *fakeStore) SearchSemantic(_ context.Context, _ string, _ []float32, _ i
 func (s *fakeStore) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
 	return nil, nil
 }
-func (s *fakeStore) Backlinks(_ context.Context, _ string) ([]core.Backlink, error) {
+func (s *fakeStore) Backlinks(_ context.Context, _ string, _ string) ([]core.Backlink, error) {
 	return nil, nil
 }
 func (s *fakeStore) Close() error { return nil }
@@ -747,7 +747,7 @@ func (s *fakeStoreWithFail) SearchSemantic(_ context.Context, _ string, _ []floa
 func (s *fakeStoreWithFail) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
 	return nil, nil
 }
-func (s *fakeStoreWithFail) Backlinks(_ context.Context, _ string) ([]core.Backlink, error) {
+func (s *fakeStoreWithFail) Backlinks(_ context.Context, _ string, _ string) ([]core.Backlink, error) {
 	if s.fails["Backlinks"] {
 		return nil, fmt.Errorf("store error: Backlinks")
 	}

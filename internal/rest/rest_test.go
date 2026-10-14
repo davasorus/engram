@@ -134,7 +134,7 @@ func (m *memStore) KeywordSearch(_ context.Context, _ string, q string, _ int) (
 	}
 	return out, nil
 }
-func (m *memStore) Backlinks(_ context.Context, idOrTitle string) ([]core.Backlink, error) {
+func (m *memStore) Backlinks(_ context.Context, idOrTitle string, _ string) ([]core.Backlink, error) {
 	if m.fail["Backlinks"] {
 		return nil, fmt.Errorf("store error: Backlinks")
 	}
