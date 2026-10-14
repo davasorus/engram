@@ -39,10 +39,15 @@ jobs:
       - name: vendored asset drift check
         run: sh scripts/check-asset-drift.sh
 
+      - name: download kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz \
+            --retry 3 --output /tmp/kubeconform.tar.gz
+          tar xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
+        shell: bash
+
       - name: validate k8s manifest
-        uses: redhat-developer/kubeconform-action@v3
-        with:
-          strict: true
+        run: kubeconform -strict kube/
 
       - name: validate compose manifest
         run: |
