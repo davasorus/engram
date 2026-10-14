@@ -52,7 +52,7 @@ services:
     # schema is defined in exactly one place — db/changelog — and never
     # duplicated into a bind mount or ConfigMap. Published alongside engram.
     # Dev overlay (Compose.dev.yml) builds this locally instead of pulling.
-    image: ghcr.io/davasorus/engram-migrate:${ENGRAM_VERSION:-latest}
+    image: ghcr.io/davasorus/engram-migrate:${ENGRAM_VERSION:-1.4.0}
     container_name: engram-migrate
     network_mode: host
     depends_on:
@@ -67,7 +67,7 @@ services:
     restart: "no"
 
   engram:
-    image: ghcr.io/davasorus/engram:${ENGRAM_VERSION:-latest}
+    image: ghcr.io/davasorus/engram:${ENGRAM_VERSION:-1.4.0}
     container_name: engram
     network_mode: host
     # Only depend on the DB being healthy — NOT on migrate completing.
