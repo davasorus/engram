@@ -21,16 +21,15 @@ Follow these rules when writing notes to engram.
 - An embedding model that supports 768-dimensional output (for example,
   nomic-embed-text-v1.5). The model must be reachable at the URL set in
   `ENGRAM_EMBED_URL`.
-- Enable Dependabot alerts and security updates in the GitHub repository
-  settings.
 
-## 1. Deploy on Lazerus
+## 1. Deploy
 
 ```bash
 cp compose/.env.example compose/.env
-# Set the embed URL to the Windows-host gateway and port-proxy port:
+# Set EMBED_URL to the host where the embedding model runs.
+# Default (localhost:1234) works when the model runs locally.
 sed -i '/^ENGRAM_EMBED_URL=/d' compose/.env
-echo "ENGRAM_EMBED_URL=http://$(ip route show default | awk '{print $3}'):1235" >> compose/.env
+echo "ENGRAM_EMBED_URL=http://localhost:1234" >> compose/.env
 podman-compose -f compose/compose.yml up -d   # pulls ghcr.io/davasorus/engram:${ENGRAM_VERSION}
 ```
 
