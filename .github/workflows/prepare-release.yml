@@ -120,8 +120,8 @@ jobs:
           tag="${{ needs.propose.outputs.tag }}"
           version="${tag#v}"
           sed -i -E "s/^ENGRAM_VERSION=.*/ENGRAM_VERSION=${version}/" compose/.env.example
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "engram-release[bot]"
+          git config user.email "engram-release[bot]@users.noreply.github.com"
           if git diff --quiet -- compose/.env.example; then
             echo "ENGRAM_VERSION already ${version}; tagging current HEAD as-is"
           else

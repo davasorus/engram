@@ -39,6 +39,26 @@ jobs:
       - name: vendored asset drift check
         run: sh scripts/check-asset-drift.sh
 
+      - name: validate k8s manifest
+        run: |
+          curl -sL https://github.com/instrumenta/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin
+          kubeconform -strict kube/engram.yaml
+
+      - name: validate compose manifest
+        run: |
+          pip install pyyaml -q
+          python -c "import yaml; yaml.safe_load(open('compose/compose.yml'))"
+
+      - name: lint .env.example
+        run: |
+          while IFS= read -r line; do
+            case "$line" in
+              ""|\#*) continue ;;
+              *=*) ;;
+              *) echo "invalid line: $line" >&2; exit 1 ;;
+            esac
+          done < compose/.env.example
+
       - name: unit tests
         run: go test -race -cover ./...
 
