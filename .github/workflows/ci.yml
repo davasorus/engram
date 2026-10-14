@@ -20,7 +20,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: true
 
       # govet, gofmt, goimports all run via golangci-lint —
@@ -40,7 +40,7 @@ jobs:
         run: sh scripts/check-asset-drift.sh
 
       - name: install kubeconform
-        run: go install github.com/yannh/kubeconform/cmd/kubeconform@latest
+        run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.4
 
       - name: validate k8s manifest
         run: kubeconform -strict kube/
