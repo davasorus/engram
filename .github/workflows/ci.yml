@@ -41,7 +41,8 @@ jobs:
 
       - name: validate k8s manifest
         run: |
-          curl -sL https://github.com/instrumenta/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin
+          curl -sL --retry 3 -o kubeconform.tar.gz https://github.com/instrumenta/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz
+          tar xzf kubeconform.tar.gz -C /usr/local/bin kubeconform
           kubeconform -strict kube/engram.yaml
 
       - name: validate compose manifest
