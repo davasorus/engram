@@ -38,8 +38,8 @@ func DefineFlags(fs *flag.FlagSet) *Config {
 	fs.StringVar(&c.DSN, "dsn", "", "Postgres connection string")
 	fs.IntVar(&c.Dims, "dims", envInt("ENGRAM_DIMS", 768), "embedding vector dimensionality")
 	fs.StringVar(&c.Addr, "addr", env("ENGRAM_ADDR", ":8088"), "HTTP listen address")
-	fs.StringVar((*string)(&c.EmbedModel), "embed-model", env("ENGRAM_EMBED_MODEL", "text-embedding-nomic-embed-text-v1.5"), "embedding model id")
-	fs.StringVar((*string)(&c.CompleteModel), "complete-model", env("ENGRAM_COMPLETE_MODEL", ""), "chat-completion model id")
+	fs.StringVar(&c.EmbedModel, "embed-model", env("ENGRAM_EMBED_MODEL", "text-embedding-nomic-embed-text-v1.5"), "embedding model id")
+	fs.StringVar(&c.CompleteModel, "complete-model", env("ENGRAM_COMPLETE_MODEL", ""), "chat-completion model id")
 	fs.BoolVar(&c.Stdio, "stdio", false, "run MCP over stdio")
 	fs.BoolVar(&c.Healthcheck, "healthcheck", false, "probe /api/health and exit")
 	// flag.FlagSet has no Int32Var; use int then cast.

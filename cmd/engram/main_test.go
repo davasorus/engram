@@ -5,43 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 )
-
-// withEnv sets env vars for the duration of a test and restores whatever
-// was there before (including "unset" for keys that didn't exist), so
-// tests can't leak state into each other or into the real environment.
-func withEnv(t *testing.T, kv map[string]string) {
-	t.Helper()
-	for k, v := range kv {
-		prev, had := os.LookupEnv(k)
-		if err := os.Setenv(k, v); err != nil {
-			t.Fatalf("setenv %s: %v", k, err)
-		}
-		t.Cleanup(func() {
-			if had {
-				_ = os.Setenv(k, prev)
-			} else {
-				_ = os.Unsetenv(k)
-			}
-		})
-	}
-}
-
-func clearDBEnv(t *testing.T) {
-	withEnv(t, map[string]string{
-		"ENGRAM_DB_HOST":     "",
-		"ENGRAM_DB_PORT":     "",
-		"ENGRAM_DB_USER":     "",
-		"ENGRAM_DB_PASSWORD": "",
-		"ENGRAM_DB_NAME":     "",
-	})
-	// withEnv sets these to "" rather than truly unsetting them; env()
-	// treats "" the same as unset (falls back to its default), so this is
-	// equivalent for the purpose of these tests and keeps withEnv simple.
-}
 
 func TestRedactDSN_HidesPassword(t *testing.T) {
 	in := "postgres://engram:supersecret@localhost:5432/engram?sslmode=disable"
