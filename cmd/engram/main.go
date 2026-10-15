@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -158,11 +159,25 @@ func runHealthcheck(addr string) int {
 	return 0
 }
 
+// logRequests logs each request method, path, and duration. It uses a
+// buffered channel so the HTTP handler never blocks on log output — under
+// load the channel may drop entries rather than stall the response.
 func logRequests(next http.Handler) http.Handler {
+	ch := make(chan string, 64)
+	go func() {
+		for msg := range ch {
+			log.Print(msg)
+		}
+	}()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("%s %s (%s)", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
+		msg := fmt.Sprintf("%s %s (%s)", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
+		select {
+		case ch <- msg:
+		default:
+			// Channel full — drop the log entry rather than block.
+		}
 	})
 }
 

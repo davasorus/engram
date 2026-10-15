@@ -36,6 +36,16 @@ func New(baseURL string) *Client {
 	}
 }
 
+// WithTimeout returns a copy of the client with a custom HTTP timeout.
+// Use it for long-running operations like Reembed that may exceed the
+// default 30-second timeout.
+func (c *Client) WithTimeout(d time.Duration) *Client {
+	return &Client{
+		BaseURL: c.BaseURL,
+		HTTP:    &http.Client{Timeout: d},
+	}
+}
+
 // apiError is the shape of an error response from internal/rest.
 type apiError struct {
 	Error string `json:"error"`
