@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/davasorus/engram/internal/cliclient"
 	"github.com/davasorus/engram/internal/core"
@@ -61,9 +62,16 @@ func runCLI(ctx context.Context, out io.Writer, args []string) int {
 // returns a func to read its resolved value (flag wins, then
 // ENGRAM_CLI_SERVER, then a localhost default).
 func cliServerFlag(fs *flag.FlagSet) func() string {
-	def := env("ENGRAM_CLI_SERVER", "http://localhost:8088")
+	def := cliEnv("ENGRAM_CLI_SERVER", "http://localhost:8088")
 	v := fs.String("server", def, "engram server base URL")
 	return func() string { return *v }
+}
+
+func cliEnv(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
 }
 
 func cliPrintJSON(out io.Writer, v any) int {
@@ -286,7 +294,13 @@ func cliReembed(ctx context.Context, out io.Writer, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	n, err := cliclient.New(server()).Reembed(ctx, *full)
+	c := cliclient.New(server())
+	if *full {
+		// Full reembed can be slow on large stores; use a generous timeout
+		// so the client doesn't abort mid-operation.
+		c = c.WithTimeout(10 * time.Minute)
+	}
+	n, err := c.Reembed(ctx, *full)
 	if err != nil {
 		return cliFail(out, err)
 	}

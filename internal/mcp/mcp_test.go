@@ -24,6 +24,11 @@ func (s *fakeStore) Upsert(_ context.Context, n core.Note) error {
 	s.notes[n.ID] = n
 	return nil
 }
+func (s *fakeStore) UpsertTx(_ context.Context, _ core.Tx, n core.Note) error {
+	s.notes[n.ID] = n
+	return nil
+}
+func (s *fakeStore) BeginTx(_ context.Context) (core.Tx, error) { return nil, nil }
 func (s *fakeStore) Get(_ context.Context, id string) (*core.Note, error) {
 	if n, ok := s.notes[id]; ok {
 		return &n, nil
@@ -35,8 +40,11 @@ func (s *fakeStore) Delete(_ context.Context, id string) error {
 	return nil
 }
 func (s *fakeStore) List(_ context.Context, _ string, _, _ int) ([]core.Note, error) { return nil, nil }
-func (s *fakeStore) Count(_ context.Context) (int, error)                            { return len(s.notes), nil }
-func (s *fakeStore) MissingVectorIDs(_ context.Context) ([]string, error)            { return nil, nil }
+func (s *fakeStore) ListAfter(_ context.Context, _ string, _ int) ([]core.Note, error) {
+	return nil, nil
+}
+func (s *fakeStore) Count(_ context.Context) (int, error)                 { return len(s.notes), nil }
+func (s *fakeStore) MissingVectorIDs(_ context.Context) ([]string, error) { return nil, nil }
 func (s *fakeStore) Stats(_ context.Context) (core.Stats, error) {
 	return core.Stats{TotalNotes: len(s.notes)}, nil
 }
@@ -46,7 +54,7 @@ func (s *fakeStore) SearchSemantic(_ context.Context, _ string, _ []float32, _ i
 func (s *fakeStore) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
 	return nil, nil
 }
-func (s *fakeStore) Backlinks(_ context.Context, _ string) ([]core.Backlink, error) {
+func (s *fakeStore) Backlinks(_ context.Context, _ string, _ string) ([]core.Backlink, error) {
 	return nil, nil
 }
 func (s *fakeStore) Close() error { return nil }
@@ -694,6 +702,14 @@ func (s *fakeStoreWithFail) Upsert(_ context.Context, n core.Note) error {
 	s.notes[n.ID] = n
 	return nil
 }
+func (s *fakeStoreWithFail) UpsertTx(_ context.Context, _ core.Tx, n core.Note) error {
+	if s.fails["Upsert"] {
+		return fmt.Errorf("store error: Upsert")
+	}
+	s.notes[n.ID] = n
+	return nil
+}
+func (s *fakeStoreWithFail) BeginTx(_ context.Context) (core.Tx, error) { return nil, nil }
 func (s *fakeStoreWithFail) Get(_ context.Context, id string) (*core.Note, error) {
 	if s.fails["Get"] {
 		return nil, fmt.Errorf("store error: Get")
@@ -711,6 +727,12 @@ func (s *fakeStoreWithFail) Delete(_ context.Context, id string) error {
 	return nil
 }
 func (s *fakeStoreWithFail) List(_ context.Context, _ string, _, _ int) ([]core.Note, error) {
+	if s.fails["List"] {
+		return nil, fmt.Errorf("store error: List")
+	}
+	return nil, nil
+}
+func (s *fakeStoreWithFail) ListAfter(_ context.Context, _ string, _ int) ([]core.Note, error) {
 	if s.fails["List"] {
 		return nil, fmt.Errorf("store error: List")
 	}
@@ -738,7 +760,7 @@ func (s *fakeStoreWithFail) SearchSemantic(_ context.Context, _ string, _ []floa
 func (s *fakeStoreWithFail) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
 	return nil, nil
 }
-func (s *fakeStoreWithFail) Backlinks(_ context.Context, _ string) ([]core.Backlink, error) {
+func (s *fakeStoreWithFail) Backlinks(_ context.Context, _ string, _ string) ([]core.Backlink, error) {
 	if s.fails["Backlinks"] {
 		return nil, fmt.Errorf("store error: Backlinks")
 	}

@@ -22,8 +22,11 @@ var md = goldmark.New(
 
 var (
 	wikilinkRe = regexp.MustCompile(`\[\[([^\]|]+)(?:\|([^\]]+))?\]\]`)
-	// Obsidian-style callouts: a blockquote whose first line is > [!TYPE] Title
-	calloutRe  = regexp.MustCompile(`(?m)^> \[!(\w+)\]\s*(.*)$`)
+	// Obsidian-style callouts: a blockquote whose first line is > [!TYPE] Title.
+	// The title part is optional — > [!NOTE] alone is valid.
+	// We use [^\S\n]* instead of \s* to avoid matching newlines inside the
+	// callout marker line.
+	calloutRe  = regexp.MustCompile(`(?m)^> ?\[!(\w+)\][^\S\n]*(.*)$`)
 	mathBlock  = regexp.MustCompile(`(?s)\$\$(.+?)\$\$`)
 	mathInline = regexp.MustCompile(`\$([^$\n]+?)\$`)
 	fenceRe    = regexp.MustCompile("(?s)```mermaid\\s*\\n(.+?)```")

@@ -37,6 +37,14 @@ func (m *memStore) Upsert(_ context.Context, n core.Note) error {
 	m.notes[n.ID] = n
 	return nil
 }
+func (m *memStore) UpsertTx(_ context.Context, _ core.Tx, n core.Note) error {
+	if m.fail["Upsert"] {
+		return fmt.Errorf("store error: Upsert")
+	}
+	m.notes[n.ID] = n
+	return nil
+}
+func (m *memStore) BeginTx(_ context.Context) (core.Tx, error) { return nil, nil }
 func (m *memStore) Get(_ context.Context, id string) (*core.Note, error) {
 	if m.fail["Get"] {
 		return nil, fmt.Errorf("store error: Get")
@@ -70,6 +78,22 @@ func (m *memStore) List(_ context.Context, project string, limit, offset int) ([
 		return nil, nil
 	}
 	out = out[offset:]
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+func (m *memStore) ListAfter(_ context.Context, afterID string, limit int) ([]core.Note, error) {
+	if m.fail["List"] {
+		return nil, fmt.Errorf("store error: List")
+	}
+	var out []core.Note
+	for _, n := range m.notes {
+		if n.ID > afterID {
+			out = append(out, n)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
@@ -118,7 +142,7 @@ func (m *memStore) KeywordSearch(_ context.Context, _ string, q string, _ int) (
 	}
 	return out, nil
 }
-func (m *memStore) Backlinks(_ context.Context, idOrTitle string) ([]core.Backlink, error) {
+func (m *memStore) Backlinks(_ context.Context, idOrTitle string, _ string) ([]core.Backlink, error) {
 	if m.fail["Backlinks"] {
 		return nil, fmt.Errorf("store error: Backlinks")
 	}

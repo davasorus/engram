@@ -16,7 +16,9 @@ type ms struct {
 	err error
 }
 
-func (m *ms) Upsert(_ context.Context, _ core.Note) error { return m.err }
+func (m *ms) Upsert(_ context.Context, _ core.Note) error              { return m.err }
+func (m *ms) UpsertTx(_ context.Context, _ core.Tx, _ core.Note) error { return m.err }
+func (m *ms) BeginTx(_ context.Context) (core.Tx, error)               { return nil, nil }
 func (m *ms) Get(_ context.Context, id string) (*core.Note, error) {
 	if m.err != nil {
 		return nil, m.err
@@ -36,6 +38,12 @@ func (m *ms) List(context.Context, string, int, int) ([]core.Note, error) {
 		out = append(out, v)
 	}
 	return out, nil
+}
+func (m *ms) ListAfter(context.Context, string, int) ([]core.Note, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return nil, nil
 }
 func (m *ms) Count(context.Context) (int, error) {
 	if m.err != nil {
@@ -62,8 +70,8 @@ func (m *ms) KeywordSearch(context.Context, string, string, int) ([]core.Note, e
 	}
 	return nil, nil
 }
-func (m *ms) Backlinks(context.Context, string) ([]core.Backlink, error) { return nil, nil }
-func (m *ms) Close() error                                               { return nil }
+func (m *ms) Backlinks(context.Context, string, string) ([]core.Backlink, error) { return nil, nil }
+func (m *ms) Close() error                                                       { return nil }
 
 // --- mock embedder ------------------------------------------------------------
 

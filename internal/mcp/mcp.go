@@ -167,7 +167,7 @@ func (a *Adapter) registerTools() {
 			Name:        "mem_links",
 			Description: "List backlinks: notes out of the given note id or title.",
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, in linksIn) (*mcp.CallToolResult, any, error) {
-			bl, err := a.eng.Backlinks(ctx, in.ID)
+			bl, err := a.eng.Backlinks(ctx, in.ID, "")
 			if err != nil {
 				return errResult(err), nil, nil
 			}

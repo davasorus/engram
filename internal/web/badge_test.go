@@ -11,13 +11,18 @@ import (
 
 type bs struct{}
 
-func (bs) Upsert(context.Context, core.Note) error { return nil }
+func (bs) Upsert(context.Context, core.Note) error            { return nil }
+func (bs) UpsertTx(context.Context, core.Tx, core.Note) error { return nil }
+func (bs) BeginTx(context.Context) (core.Tx, error)           { return nil, nil }
 func (bs) Get(_ context.Context, id string) (*core.Note, error) {
 	return &core.Note{ID: id, Project: "engram", Title: "T", Body: "b"}, nil
 }
 func (bs) Delete(context.Context, string) error { return nil }
 func (bs) List(_ context.Context, _ string, _, _ int) ([]core.Note, error) {
 	return []core.Note{{ID: "n1", Project: "engram", Title: "N1", Body: "b"}}, nil
+}
+func (bs) ListAfter(context.Context, string, int) ([]core.Note, error) {
+	return nil, nil
 }
 func (bs) Count(context.Context) (int, error)                 { return 1, nil }
 func (bs) MissingVectorIDs(context.Context) ([]string, error) { return nil, nil }
@@ -28,8 +33,8 @@ func (bs) SearchSemantic(_ context.Context, _ string, _ []float32, _ int) ([]cor
 func (bs) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
 	return nil, nil
 }
-func (bs) Backlinks(context.Context, string) ([]core.Backlink, error) { return nil, nil }
-func (bs) Close() error                                               { return nil }
+func (bs) Backlinks(context.Context, string, string) ([]core.Backlink, error) { return nil, nil }
+func (bs) Close() error                                                       { return nil }
 
 type be struct{}
 

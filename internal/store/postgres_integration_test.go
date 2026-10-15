@@ -170,7 +170,7 @@ func TestPostgresKeywordAndBacklinks(t *testing.T) {
 	}
 
 	// backlinks: 'source' links to 'target note' (by title)
-	bl, err := st.Backlinks(ctx, "target")
+	bl, err := st.Backlinks(ctx, "target", "")
 	if err != nil {
 		t.Fatalf("backlinks: %v", err)
 	}

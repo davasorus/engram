@@ -101,7 +101,7 @@ func (s *Server) view(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	bl, err := s.eng.Backlinks(r.Context(), id)
+	bl, err := s.eng.Backlinks(r.Context(), id, "")
 	if err != nil {
 		log.Printf("web: view backlinks: %v", err)
 	}
