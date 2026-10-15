@@ -63,6 +63,14 @@ type Store interface {
 	// populated Note including Vector, Links, ContentHash.
 	Upsert(ctx context.Context, n Note) error
 
+	// UpsertTx is like Upsert but uses an existing transaction so callers
+	// can batch multiple upserts (e.g. reembedAll) into a single DB commit.
+	UpsertTx(ctx context.Context, tx Tx, n Note) error
+
+	// BeginTx starts a new transaction that can be passed to UpsertTx.
+	// Returns nil for stores that do not support transactions (e.g. memStore).
+	BeginTx(ctx context.Context) (Tx, error)
+
 	// Get returns a note by ID, or (nil, nil) if not found.
 	Get(ctx context.Context, id string) (*Note, error)
 
@@ -108,6 +116,14 @@ type Store interface {
 
 	// Close releases resources.
 	Close() error
+}
+
+// Tx abstracts a database transaction so the store can be used with both
+// pgx transactions and the in-memory test store (which returns nil).
+type Tx interface {
+	Exec(ctx context.Context, sql string, args ...any) error
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
 }
 
 // Embedder turns text into a vector. The default implementation calls an

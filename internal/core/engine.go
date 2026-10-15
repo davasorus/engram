@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -403,6 +404,22 @@ func (e *Engine) Reembed(ctx context.Context, full bool) (int, error) {
 func (e *Engine) reembedAll(ctx context.Context) (int, error) {
 	var n int
 	var afterID string
+
+	// Use an outer transaction so all upserts share a single DB commit,
+	// avoiding per-note transaction overhead. Stores that don't support
+	// transactions (e.g. the in-memory test store) return nil, in which
+	// case we fall through to the unbatched path.
+	tx, err := e.store.BeginTx(ctx)
+	if err != nil {
+		return n, err
+	}
+
+	if tx != nil {
+		defer func() {
+			_ = tx.Rollback(ctx)
+		}()
+	}
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return n, err
@@ -415,12 +432,18 @@ func (e *Engine) reembedAll(ctx context.Context) (int, error) {
 			break
 		}
 		for _, note := range batch {
-			if err := e.reembedOne(ctx, note); err != nil {
+			if err := e.reembedOneTx(ctx, tx, note); err != nil {
 				return n, err
 			}
 			n++
 		}
 		afterID = batch[len(batch)-1].ID
+	}
+
+	if tx != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return n, err
+		}
 	}
 	return n, nil
 }
@@ -430,7 +453,19 @@ func (e *Engine) reembedMissing(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	// Semaphore to bound concurrency (capped to avoid resource exhaustion on
+	// large batches). Each goroutine acquires before starting, releases after
+	// completing the note.
+	sem := make(chan struct{}, 10)
+	var mu sync.Mutex
 	var n int
+	var firstErr error
+	var wg sync.WaitGroup
+
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return n, err
@@ -442,15 +477,48 @@ func (e *Engine) reembedMissing(ctx context.Context) (int, error) {
 		if note == nil {
 			continue
 		}
-		if err := e.reembedOne(ctx, *note); err != nil {
-			return n, err
-		}
-		n++
+		wg.Add(1)
+		go func(note Note) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			if err := ctx.Err(); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			if err := e.reembedOne(ctx, note); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			n++
+			mu.Unlock()
+		}(*note)
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return n, firstErr
 	}
 	return n, nil
 }
 
 func (e *Engine) reembedOne(ctx context.Context, note Note) error {
+	return e.reembedOneTx(ctx, nil, note)
+}
+
+// reembedOneTx is the shared re-embedding logic. When tx is non-nil, the
+// upsert uses it (batching commits); when nil, Upsert creates its own.
+func (e *Engine) reembedOneTx(ctx context.Context, tx Tx, note Note) error {
 	v, err := e.embedder.Embed(ctx, embedText(note.Title, note.Body))
 	if err != nil {
 		return fmt.Errorf("reembed %q: %w", note.ID, err)
@@ -458,6 +526,9 @@ func (e *Engine) reembedOne(ctx context.Context, note Note) error {
 	note.Vector = v
 	note.Links = parseLinks(note.Body)
 	note.ContentHash = hashBody(note.Body)
+	if tx != nil {
+		return e.store.UpsertTx(ctx, tx, note)
+	}
 	return e.store.Upsert(ctx, note)
 }
 

@@ -11,7 +11,9 @@ import (
 
 type bs struct{}
 
-func (bs) Upsert(context.Context, core.Note) error { return nil }
+func (bs) Upsert(context.Context, core.Note) error            { return nil }
+func (bs) UpsertTx(context.Context, core.Tx, core.Note) error { return nil }
+func (bs) BeginTx(context.Context) (core.Tx, error)           { return nil, nil }
 func (bs) Get(_ context.Context, id string) (*core.Note, error) {
 	return &core.Note{ID: id, Project: "engram", Title: "T", Body: "b"}, nil
 }

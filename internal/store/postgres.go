@@ -138,11 +138,53 @@ func (p *Postgres) Upsert(ctx context.Context, n core.Note) error {
 		_ = tx.Rollback(ctx)
 	}()
 
+	return p.upsertTx(tx, ctx, n, fm, tags)
+}
+
+func (p *Postgres) UpsertTx(ctx context.Context, tx core.Tx, n core.Note) error {
+	if n.Created.IsZero() {
+		n.Created = time.Now().UTC()
+	}
+	n.Updated = time.Now().UTC()
+	fm, _ := json.Marshal(orEmptyMap(n.Frontmatter))
+	tags, _ := json.Marshal(orEmptySlice(n.Tags))
+
+	// Cast back to pgx.Tx for internal use. This is safe because BeginTx
+	// only returns pgTx (which embeds pgx.Tx) or nil.
+	var pgTxTx pgx.Tx
+	if tx != nil {
+		pgTxTx = tx.(*pgTx).Tx
+	}
+	return p.upsertTx(pgTxTx, ctx, n, fm, tags)
+}
+
+func (p *Postgres) BeginTx(ctx context.Context) (core.Tx, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &pgTx{Tx: tx}, nil
+}
+
+// pgTx wraps pgx.Tx so it satisfies core.Tx (the Exec signature differs).
+type pgTx struct {
+	pgx.Tx
+}
+
+func (t *pgTx) Exec(ctx context.Context, sql string, args ...any) error {
+	_, err := t.Tx.Exec(ctx, sql, args...)
+	return err
+}
+
+// upsertTx is the shared transactional upsert logic used by both Upsert and
+// UpsertTx. Upsert creates its own transaction; UpsertTx receives one from
+// the caller (e.g. reembedAll) so multiple upserts can commit together.
+func (p *Postgres) upsertTx(tx pgx.Tx, ctx context.Context, n core.Note, fm, tags []byte) error {
 	var emb any
 	if len(n.Vector) > 0 {
 		emb = pgvector.NewVector(n.Vector)
 	}
-	_, err = tx.Exec(ctx, `
+	_, err := tx.Exec(ctx, `
 INSERT INTO notes (id,project,title,body,frontmatter,tags,content_hash,embedding,created,updated)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 ON CONFLICT (id) DO UPDATE SET

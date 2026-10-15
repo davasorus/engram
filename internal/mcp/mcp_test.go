@@ -24,6 +24,11 @@ func (s *fakeStore) Upsert(_ context.Context, n core.Note) error {
 	s.notes[n.ID] = n
 	return nil
 }
+func (s *fakeStore) UpsertTx(_ context.Context, _ core.Tx, n core.Note) error {
+	s.notes[n.ID] = n
+	return nil
+}
+func (s *fakeStore) BeginTx(_ context.Context) (core.Tx, error) { return nil, nil }
 func (s *fakeStore) Get(_ context.Context, id string) (*core.Note, error) {
 	if n, ok := s.notes[id]; ok {
 		return &n, nil
@@ -697,6 +702,14 @@ func (s *fakeStoreWithFail) Upsert(_ context.Context, n core.Note) error {
 	s.notes[n.ID] = n
 	return nil
 }
+func (s *fakeStoreWithFail) UpsertTx(_ context.Context, _ core.Tx, n core.Note) error {
+	if s.fails["Upsert"] {
+		return fmt.Errorf("store error: Upsert")
+	}
+	s.notes[n.ID] = n
+	return nil
+}
+func (s *fakeStoreWithFail) BeginTx(_ context.Context) (core.Tx, error) { return nil, nil }
 func (s *fakeStoreWithFail) Get(_ context.Context, id string) (*core.Note, error) {
 	if s.fails["Get"] {
 		return nil, fmt.Errorf("store error: Get")

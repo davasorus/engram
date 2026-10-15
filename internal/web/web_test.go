@@ -16,7 +16,9 @@ type ms struct {
 	err error
 }
 
-func (m *ms) Upsert(_ context.Context, _ core.Note) error { return m.err }
+func (m *ms) Upsert(_ context.Context, _ core.Note) error              { return m.err }
+func (m *ms) UpsertTx(_ context.Context, _ core.Tx, _ core.Note) error { return m.err }
+func (m *ms) BeginTx(_ context.Context) (core.Tx, error)               { return nil, nil }
 func (m *ms) Get(_ context.Context, id string) (*core.Note, error) {
 	if m.err != nil {
 		return nil, m.err

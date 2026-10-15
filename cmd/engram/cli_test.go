@@ -20,6 +20,11 @@ type memStore struct{ notes map[string]core.Note }
 func newMem() *memStore { return &memStore{notes: map[string]core.Note{}} }
 
 func (m *memStore) Upsert(_ context.Context, n core.Note) error { m.notes[n.ID] = n; return nil }
+func (m *memStore) UpsertTx(_ context.Context, _ core.Tx, n core.Note) error {
+	m.notes[n.ID] = n
+	return nil
+}
+func (m *memStore) BeginTx(_ context.Context) (core.Tx, error) { return nil, nil }
 func (m *memStore) Get(_ context.Context, id string) (*core.Note, error) {
 	n, ok := m.notes[id]
 	if !ok {

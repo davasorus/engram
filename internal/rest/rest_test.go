@@ -37,6 +37,14 @@ func (m *memStore) Upsert(_ context.Context, n core.Note) error {
 	m.notes[n.ID] = n
 	return nil
 }
+func (m *memStore) UpsertTx(_ context.Context, _ core.Tx, n core.Note) error {
+	if m.fail["Upsert"] {
+		return fmt.Errorf("store error: Upsert")
+	}
+	m.notes[n.ID] = n
+	return nil
+}
+func (m *memStore) BeginTx(_ context.Context) (core.Tx, error) { return nil, nil }
 func (m *memStore) Get(_ context.Context, id string) (*core.Note, error) {
 	if m.fail["Get"] {
 		return nil, fmt.Errorf("store error: Get")
