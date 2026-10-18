@@ -49,7 +49,7 @@ jobs:
     # The tag/bump commit is pushed with RELEASE_PAT below, which re-triggers
     # this workflow's `push` event. Skip that second run instead of letting
     # svu re-evaluate an already-tagged commit.
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release)') }}
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release)') || github.event_name == 'workflow_dispatch' }}
     outputs:
       skip: ${{ steps.next.outputs.skip }}
       tag: ${{ steps.next.outputs.tag }}
@@ -101,7 +101,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: release # required reviewer here -> pauses for approval
     steps:
-      - run: echo "Approved. Proceeding to tag ${{ needs.propose.outputs.tag }}."
+      - run: |
+          echo "## Gate approved" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Proposed version:** ${{ needs.propose.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[View proposal →](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)" >> "$GITHUB_STEP_SUMMARY"
+        if: ${{ needs.propose.outputs.tag != '' }}
 
   # ---- TAG: only after approval. Pushing the tag triggers the `release` workflow. ----
   tag:
@@ -112,6 +118,7 @@ jobs:
         with:
           ref: live
           fetch-depth: 0
+          persist-credentials: false
           token: ${{ secrets.RELEASE_PAT }}
 
       - name: bump ENGRAM_VERSION, commit, and tag
