@@ -12,11 +12,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GO_VERSION: "1.25"
+
 jobs:
-  build-test:
+  # ---- lint, schema, and asset checks (no Docker needed) ----
+  checks:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@v7
         with:
@@ -39,17 +47,6 @@ jobs:
       - name: vendored asset drift check
         run: sh scripts/check-asset-drift.sh
 
-      - name: install kubeconform
-        run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.4
-
-      - name: validate k8s manifest
-        run: kubeconform -strict kube/
-
-      - name: validate compose manifest
-        run: |
-          pip install pyyaml -q
-          python -c "import yaml; yaml.safe_load(open('compose/compose.yml'))"
-
       - name: lint .env.example
         run: |
           while IFS= read -r line; do
@@ -60,10 +57,82 @@ jobs:
             esac
           done < compose/.env.example
 
+      # ---- k8s manifest validation ----
+      - name: cache kubeconform
+        id: cache-kubeconform
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/kubeconform
+          key: kubeconform-v0.6.4-${{ runner.os }}
+      - name: install kubeconform
+        run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.4
+        if: ${{ !steps.cache-kubeconform.outputs.cache-hit }}
+
+      - name: validate k8s manifest
+        run: kubeconform -strict kube/
+
+      # ---- compose manifest validation (compose-spec schema) ----
+      - name: validate compose manifest
+        run: docker compose -f compose/compose.yml config --quiet
+
+  # ---- unit tests (no Docker needed) ----
+  unit-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
       - name: unit tests
         run: go test -race -cover ./...
 
-      # Integration tests spin up a real pgvector container via testcontainers.
-      # Docker daemon is available on GitHub's ubuntu runners by default.
+  # ---- integration tests (needs Docker for testcontainers) ----
+  integration-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
       - name: integration tests (pgvector)
         run: go test -tags=integration -race ./internal/store/...
+
+  # ---- Docker build test ----
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: set up docker buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: engram-ci-test:latest
+
+      - name: verify HEALTHCHECK
+        run: |
+          docker inspect --format='{{json .Config.Healthcheck}}' engram-ci-test:latest | python3 -m json.tool
