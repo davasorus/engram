@@ -11,8 +11,8 @@ func TestEnv(t *testing.T) {
 	const key = "TEST_CONFIG_ENV_KEY"
 
 	t.Run("returns env var when set", func(t *testing.T) {
-		os.Setenv(key, "from-env")
-		defer os.Unsetenv(key)
+		_ = os.Setenv(key, "from-env")
+		defer func() { _ = os.Unsetenv(key) }()
 
 		got := env(key, "default")
 		if got != "from-env" {
@@ -21,7 +21,7 @@ func TestEnv(t *testing.T) {
 	})
 
 	t.Run("returns default when unset", func(t *testing.T) {
-		os.Unsetenv(key)
+		_ = os.Unsetenv(key)
 		got := env(key, "default")
 		if got != "default" {
 			t.Errorf("env(%q, %q) = %q; want %q", key, "default", got, "default")
@@ -29,8 +29,8 @@ func TestEnv(t *testing.T) {
 	})
 
 	t.Run("returns default when empty", func(t *testing.T) {
-		os.Setenv(key, "")
-		defer os.Unsetenv(key)
+		_ = os.Setenv(key, "")
+		defer func() { _ = os.Unsetenv(key) }()
 		got := env(key, "default")
 		if got != "default" {
 			t.Errorf("env(%q, %q) = %q; want %q", key, "default", got, "default")
@@ -42,8 +42,8 @@ func TestEnvInt(t *testing.T) {
 	const key = "TEST_CONFIG_ENVINT_KEY"
 
 	t.Run("returns parsed int when set", func(t *testing.T) {
-		os.Setenv(key, "42")
-		defer os.Unsetenv(key)
+		_ = os.Setenv(key, "42")
+		defer func() { _ = os.Unsetenv(key) }()
 
 		got := envInt(key, 0)
 		if got != 42 {
@@ -52,7 +52,7 @@ func TestEnvInt(t *testing.T) {
 	})
 
 	t.Run("returns default when unset", func(t *testing.T) {
-		os.Unsetenv(key)
+		_ = os.Unsetenv(key)
 		got := envInt(key, 100)
 		if got != 100 {
 			t.Errorf("envInt(%q, 100) = %d; want 100", key, got)
@@ -60,8 +60,8 @@ func TestEnvInt(t *testing.T) {
 	})
 
 	t.Run("returns default when invalid", func(t *testing.T) {
-		os.Setenv(key, "not-a-number")
-		defer os.Unsetenv(key)
+		_ = os.Setenv(key, "not-a-number")
+		defer func() { _ = os.Unsetenv(key) }()
 		got := envInt(key, 7)
 		if got != 7 {
 			t.Errorf("envInt(%q, 7) = %d; want 7", key, got)
@@ -69,8 +69,8 @@ func TestEnvInt(t *testing.T) {
 	})
 
 	t.Run("returns default when empty", func(t *testing.T) {
-		os.Setenv(key, "")
-		defer os.Unsetenv(key)
+		_ = os.Setenv(key, "")
+		defer func() { _ = os.Unsetenv(key) }()
 		got := envInt(key, 5)
 		if got != 5 {
 			t.Errorf("envInt(%q, 5) = %d; want 5", key, got)
@@ -82,8 +82,8 @@ func TestEnvDuration(t *testing.T) {
 	const key = "TEST_CONFIG_ENVDUR_KEY"
 
 	t.Run("returns parsed duration when set", func(t *testing.T) {
-		os.Setenv(key, "5m30s")
-		defer os.Unsetenv(key)
+		_ = os.Setenv(key, "5m30s")
+		defer func() { _ = os.Unsetenv(key) }()
 
 		got := envDuration(key, 0)
 		want := 5*time.Minute + 30*time.Second
@@ -93,7 +93,7 @@ func TestEnvDuration(t *testing.T) {
 	})
 
 	t.Run("returns default when unset", func(t *testing.T) {
-		os.Unsetenv(key)
+		_ = os.Unsetenv(key)
 		got := envDuration(key, time.Hour)
 		if got != time.Hour {
 			t.Errorf("envDuration(%q, 1h) = %v; want 1h", key, got)
@@ -101,8 +101,8 @@ func TestEnvDuration(t *testing.T) {
 	})
 
 	t.Run("returns default when invalid", func(t *testing.T) {
-		os.Setenv(key, "invalid")
-		defer os.Unsetenv(key)
+		_ = os.Setenv(key, "invalid")
+		defer func() { _ = os.Unsetenv(key) }()
 		got := envDuration(key, time.Minute)
 		if got != time.Minute {
 			t.Errorf("envDuration(%q, 1m) = %v; want 1m", key, got)
@@ -110,8 +110,8 @@ func TestEnvDuration(t *testing.T) {
 	})
 
 	t.Run("returns default when empty", func(t *testing.T) {
-		os.Setenv(key, "")
-		defer os.Unsetenv(key)
+		_ = os.Setenv(key, "")
+		defer func() { _ = os.Unsetenv(key) }()
 		got := envDuration(key, 10*time.Second)
 		if got != 10*time.Second {
 			t.Errorf("envDuration(%q, 10s) = %v; want 10s", key, got)
@@ -174,18 +174,18 @@ func TestSplitCSV(t *testing.T) {
 }
 
 func TestDefineFlags(t *testing.T) {
-	os.Unsetenv("ENGRAM_DSN")
-	os.Unsetenv("ENGRAM_DIMS")
-	os.Unsetenv("ENGRAM_ADDR")
-	os.Unsetenv("ENGRAM_EMBED_MODEL")
-	os.Unsetenv("ENGRAM_COMPLETE_MODEL")
-	os.Unsetenv("ENGRAM_EMBED_URL")
-	os.Unsetenv("ENGRAM_COMPLETE_URL")
-	os.Unsetenv("ENGRAM_MCP_TOOLS")
-	os.Unsetenv("ENGRAM_DB_MAX_CONNS")
-	os.Unsetenv("ENGRAM_DB_MIN_CONNS")
-	os.Unsetenv("ENGRAM_DB_CONN_MAX_LIFETIME")
-	os.Unsetenv("ENGRAM_DB_CONN_MAX_IDLE_TIME")
+	_ = os.Unsetenv("ENGRAM_DSN")
+	_ = os.Unsetenv("ENGRAM_DIMS")
+	_ = os.Unsetenv("ENGRAM_ADDR")
+	_ = os.Unsetenv("ENGRAM_EMBED_MODEL")
+	_ = os.Unsetenv("ENGRAM_COMPLETE_MODEL")
+	_ = os.Unsetenv("ENGRAM_EMBED_URL")
+	_ = os.Unsetenv("ENGRAM_COMPLETE_URL")
+	_ = os.Unsetenv("ENGRAM_MCP_TOOLS")
+	_ = os.Unsetenv("ENGRAM_DB_MAX_CONNS")
+	_ = os.Unsetenv("ENGRAM_DB_MIN_CONNS")
+	_ = os.Unsetenv("ENGRAM_DB_CONN_MAX_LIFETIME")
+	_ = os.Unsetenv("ENGRAM_DB_CONN_MAX_IDLE_TIME")
 
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	c := DefineFlags(fs)
@@ -277,7 +277,7 @@ func TestResolve(t *testing.T) {
 		"ENGRAM_DB_USER", "ENGRAM_DB_PASSWORD",
 		"ENGRAM_DB_HOST", "ENGRAM_DB_PORT", "ENGRAM_DB_NAME",
 	} {
-		os.Unsetenv(k)
+		_ = os.Unsetenv(k)
 	}
 
 	c := &Config{
@@ -322,17 +322,17 @@ func TestResolve(t *testing.T) {
 
 func TestResolveWithEnv(t *testing.T) {
 	// Set all env vars
-	os.Setenv("ENGRAM_DSN", "postgres://envuser:envpass@envhost:5433/envdb?sslmode=enable")
-	os.Setenv("ENGRAM_EMBED_MODEL", "env-embed-model")
-	os.Setenv("ENGRAM_COMPLETE_MODEL", "env-complete-model")
-	os.Setenv("ENGRAM_EMBED_URL", "http://embed1:1234,http://embed2:1234")
-	os.Setenv("ENGRAM_COMPLETE_URL", "http://complete:8000")
-	os.Setenv("ENGRAM_MCP_TOOLS", "tool1,tool2,tool3")
-	os.Setenv("ENGRAM_DB_USER", "dbuser")
-	os.Setenv("ENGRAM_DB_PASSWORD", "dbpass")
-	os.Setenv("ENGRAM_DB_HOST", "dbhost")
-	os.Setenv("ENGRAM_DB_PORT", "5433")
-	os.Setenv("ENGRAM_DB_NAME", "dbname")
+	_ = os.Setenv("ENGRAM_DSN", "postgres://envuser:envpass@envhost:5433/envdb?sslmode=enable")
+	_ = os.Setenv("ENGRAM_EMBED_MODEL", "env-embed-model")
+	_ = os.Setenv("ENGRAM_COMPLETE_MODEL", "env-complete-model")
+	_ = os.Setenv("ENGRAM_EMBED_URL", "http://embed1:1234,http://embed2:1234")
+	_ = os.Setenv("ENGRAM_COMPLETE_URL", "http://complete:8000")
+	_ = os.Setenv("ENGRAM_MCP_TOOLS", "tool1,tool2,tool3")
+	_ = os.Setenv("ENGRAM_DB_USER", "dbuser")
+	_ = os.Setenv("ENGRAM_DB_PASSWORD", "dbpass")
+	_ = os.Setenv("ENGRAM_DB_HOST", "dbhost")
+	_ = os.Setenv("ENGRAM_DB_PORT", "5433")
+	_ = os.Setenv("ENGRAM_DB_NAME", "dbname")
 	defer func() {
 		for _, k := range []string{
 			"ENGRAM_DSN", "ENGRAM_EMBED_MODEL", "ENGRAM_COMPLETE_MODEL",
@@ -341,7 +341,7 @@ func TestResolveWithEnv(t *testing.T) {
 			"ENGRAM_DB_USER", "ENGRAM_DB_PASSWORD",
 			"ENGRAM_DB_HOST", "ENGRAM_DB_PORT", "ENGRAM_DB_NAME",
 		} {
-			os.Unsetenv(k)
+			_ = os.Unsetenv(k)
 		}
 	}()
 
@@ -379,7 +379,7 @@ func TestResolveDSN(t *testing.T) {
 		"ENGRAM_DB_USER", "ENGRAM_DB_PASSWORD",
 		"ENGRAM_DB_HOST", "ENGRAM_DB_PORT", "ENGRAM_DB_NAME",
 	} {
-		os.Unsetenv(k)
+		_ = os.Unsetenv(k)
 	}
 
 	got := resolveDSN()
@@ -390,17 +390,17 @@ func TestResolveDSN(t *testing.T) {
 }
 
 func TestResolveDSNWithEnv(t *testing.T) {
-	os.Setenv("ENGRAM_DB_USER", "myuser")
-	os.Setenv("ENGRAM_DB_PASSWORD", "mypass")
-	os.Setenv("ENGRAM_DB_HOST", "myhost")
-	os.Setenv("ENGRAM_DB_PORT", "5433")
-	os.Setenv("ENGRAM_DB_NAME", "mydb")
+	_ = os.Setenv("ENGRAM_DB_USER", "myuser")
+	_ = os.Setenv("ENGRAM_DB_PASSWORD", "mypass")
+	_ = os.Setenv("ENGRAM_DB_HOST", "myhost")
+	_ = os.Setenv("ENGRAM_DB_PORT", "5433")
+	_ = os.Setenv("ENGRAM_DB_NAME", "mydb")
 	defer func() {
 		for _, k := range []string{
 			"ENGRAM_DB_USER", "ENGRAM_DB_PASSWORD",
 			"ENGRAM_DB_HOST", "ENGRAM_DB_PORT", "ENGRAM_DB_NAME",
 		} {
-			os.Unsetenv(k)
+			_ = os.Unsetenv(k)
 		}
 	}()
 
@@ -412,11 +412,11 @@ func TestResolveDSNWithEnv(t *testing.T) {
 }
 
 func TestResolveDSNWithSpecialChars(t *testing.T) {
-	os.Setenv("ENGRAM_DB_USER", "user@domain")
-	os.Setenv("ENGRAM_DB_PASSWORD", "p@ss:w0rd")
+	_ = os.Setenv("ENGRAM_DB_USER", "user@domain")
+	_ = os.Setenv("ENGRAM_DB_PASSWORD", "p@ss:w0rd")
 	defer func() {
-		os.Unsetenv("ENGRAM_DB_USER")
-		os.Unsetenv("ENGRAM_DB_PASSWORD")
+		_ = os.Unsetenv("ENGRAM_DB_USER")
+		_ = os.Unsetenv("ENGRAM_DB_PASSWORD")
 	}()
 
 	got := resolveDSN()
@@ -427,14 +427,14 @@ func TestResolveDSNWithSpecialChars(t *testing.T) {
 }
 
 func TestDefineFlagsWithEnvDefaults(t *testing.T) {
-	os.Setenv("ENGRAM_DIMS", "1536")
-	os.Setenv("ENGRAM_ADDR", "0.0.0.0:9999")
-	os.Setenv("ENGRAM_EMBED_MODEL", "env-embed")
-	os.Setenv("ENGRAM_COMPLETE_MODEL", "env-complete")
-	os.Setenv("ENGRAM_DB_MAX_CONNS", "50")
-	os.Setenv("ENGRAM_DB_MIN_CONNS", "5")
-	os.Setenv("ENGRAM_DB_CONN_MAX_LIFETIME", "1h")
-	os.Setenv("ENGRAM_DB_CONN_MAX_IDLE_TIME", "30m")
+	_ = os.Setenv("ENGRAM_DIMS", "1536")
+	_ = os.Setenv("ENGRAM_ADDR", "0.0.0.0:9999")
+	_ = os.Setenv("ENGRAM_EMBED_MODEL", "env-embed")
+	_ = os.Setenv("ENGRAM_COMPLETE_MODEL", "env-complete")
+	_ = os.Setenv("ENGRAM_DB_MAX_CONNS", "50")
+	_ = os.Setenv("ENGRAM_DB_MIN_CONNS", "5")
+	_ = os.Setenv("ENGRAM_DB_CONN_MAX_LIFETIME", "1h")
+	_ = os.Setenv("ENGRAM_DB_CONN_MAX_IDLE_TIME", "30m")
 	defer func() {
 		for _, k := range []string{
 			"ENGRAM_DIMS", "ENGRAM_ADDR", "ENGRAM_EMBED_MODEL",
@@ -442,7 +442,7 @@ func TestDefineFlagsWithEnvDefaults(t *testing.T) {
 			"ENGRAM_DB_MIN_CONNS", "ENGRAM_DB_CONN_MAX_LIFETIME",
 			"ENGRAM_DB_CONN_MAX_IDLE_TIME",
 		} {
-			os.Unsetenv(k)
+			_ = os.Unsetenv(k)
 		}
 	}()
 

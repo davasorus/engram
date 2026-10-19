@@ -1223,29 +1223,6 @@ func TestReembedMissing_ContextCancellation(t *testing.T) {
 	}
 }
 
-// memStoreFailKeyword is a memStore that fails KeywordSearch to test hybrid
-// degradation paths.
-type memStoreFailKeyword struct {
-	memStore
-}
-
-func (m *memStoreFailKeyword) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
-	return nil, fmt.Errorf("keyword search failed")
-}
-
-// memStoreFailBoth fails both SearchSemantic and KeywordSearch.
-type memStoreFailBoth struct {
-	memStore
-}
-
-func (m *memStoreFailBoth) SearchSemantic(_ context.Context, _ string, _ []float32, _ int) ([]core.SearchHit, error) {
-	return nil, fmt.Errorf("semantic search failed")
-}
-
-func (m *memStoreFailBoth) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
-	return nil, fmt.Errorf("keyword search failed")
-}
-
 // TestHybridSemanticFailsDegradesToKeyword verifies that when semantic search
 // fails but keyword succeeds, hybrid degrades to keyword results.
 func TestHybridSemanticFailsDegradesToKeyword(t *testing.T) {
