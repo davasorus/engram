@@ -108,6 +108,7 @@ jobs:
         with:
           files: ./cover.out
           fail_on_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   # ---- integration tests (needs Docker for testcontainers) ----
   integration-tests:
