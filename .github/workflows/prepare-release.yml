@@ -118,7 +118,6 @@ jobs:
         with:
           ref: live
           fetch-depth: 0
-          persist-credentials: false
           token: ${{ secrets.RELEASE_PAT }}
 
       - name: bump ENGRAM_VERSION, commit, and tag
