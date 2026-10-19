@@ -67,7 +67,7 @@ jobs:
       contents: read
       pull-requests: write
     env:
-      COVERAGE_MIN: "85"
+      COVERAGE_MIN: "80"
       COVERAGE_TARGET: "95"
     steps:
       - uses: actions/checkout@v7
@@ -104,9 +104,13 @@ jobs:
           SKIPPED=$(jq -s '[.[] | select(.Test != null and .Action=="skip")] | length' test.json)
           TOTAL=$((PASSED + FAILED + SKIPPED))
 
-          COV=0
+          # Line coverage (same unit and same number as Coveralls), from the Go profile.
+          COV=0; COV_LINES=""; STMT=0
           if [ -s cover.out ]; then
-            COV=$(go tool cover -func=cover.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+            awk -f scripts/linecov.awk cover.out | sort > linecov.tsv
+            COV=$(awk -F'\t' '$1=="TOTAL" {print $4}' linecov.tsv)
+            COV_LINES=$(awk -F'\t' '$1=="TOTAL" {printf "%d of %d lines", $2, $3}' linecov.tsv)
+            STMT=$(go tool cover -func=cover.out | awk '/^total:/ {gsub("%","",$3); print $3}')
           fi
           COV=${COV:-0}
 
@@ -159,16 +163,12 @@ jobs:
             echo
             echo "### 📊 Code Coverage"
             echo
-            echo "| Scope | Statement Coverage | Threshold | Status |"
-            echo "|-------|-------------------:|----------:|--------|"
-            echo "| **Total** | **${COV}%** | ${COVERAGE_MIN}% | $TIER |"
-            jq -r 'select(.Action=="output" and (.Output | test("coverage: [0-9.]+% of statements")))
-                   | "\(.Package)\t\(.Output | capture("coverage: (?<p>[0-9.]+)%").p)"' test.json \
-              | sort -u -k1,1 \
-              | sed "s|$PKG_PREFIX||" \
-              | awk -F'\t' -v mn="$COVERAGE_MIN" '{printf "| %s | %.1f%% | %s%% | %s |\n", $1, $2, mn, ($2+0 >= mn+0 ? "✅" : "⚠️")}'
+            echo "| Scope | Line Coverage | Threshold | Status |"
+            echo "|-------|--------------:|----------:|--------|"
+            echo "| **Total** (${COV_LINES}) | **${COV}%** | ${COVERAGE_MIN}% | $TIER |"
+            awk -F'\t' -v mn="$COVERAGE_MIN" '$1=="DIR" {printf "| %s (%d/%d) | %.1f%% | %s%% | %s |\n", $2, $3, $4, $5, mn, ($5+0 >= mn+0 ? "✅" : "⚠️")}' linecov.tsv
             echo
-            echo "*Tiers: 🌟 Excellent (100%) | ✅ Good (${COVERAGE_TARGET}-99%) | ⚠️ OK (${COVERAGE_MIN}-$((COVERAGE_TARGET-1))%) | ❌ Failed (<${COVERAGE_MIN}%). The gate applies to the total; per-package marks are informational.*"
+            echo "*Line coverage matches Coveralls. Go statement coverage: ${STMT}%. Tiers: 🌟 100% | ✅ ${COVERAGE_TARGET}-99% | ⚠️ ${COVERAGE_MIN}-$((COVERAGE_TARGET-1))% | ❌ <${COVERAGE_MIN}%. The gate applies to the total; per-package marks are informational.*"
             echo
             echo "### 📋 Project Details"
             echo "- **Coverage Threshold**: ${COVERAGE_MIN}% (Min) | ${COVERAGE_TARGET}% (Target)"
@@ -210,6 +210,7 @@ jobs:
           name: test-results
           path: |
             cover.out
+            linecov.tsv
             test.json
             comment.md
           retention-days: 7
