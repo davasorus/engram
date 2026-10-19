@@ -12,15 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GO_VERSION: "1.25"
-
 jobs:
-  # ---- lint, schema, and asset checks (no Docker needed) ----
   checks:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -28,22 +22,15 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: 'go.mod'
+          go-version-file: go.mod
           cache: true
 
-      # govet, gofmt, goimports all run via golangci-lint —
-      # no standalone steps, one source of truth (.golangci.yml).
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
-          # setup-go above already caches modules/build artifacts;
-          # avoid the action double-caching the same dirs.
           skip-cache: true
 
-      # Vendored JS (htmx/alpine in internal/web/static) must match the
-      # versions in package.json — the manifest dependabot tracks. Node is
-      # preinstalled on ubuntu runners.
       - name: vendored asset drift check
         run: sh scripts/check-asset-drift.sh
 
@@ -57,29 +44,31 @@ jobs:
             esac
           done < compose/.env.example
 
-      # ---- k8s manifest validation ----
       - name: cache kubeconform
         id: cache-kubeconform
         uses: actions/cache@v6
         with:
-          path: ~/.local/bin/kubeconform
+          path: ~/go/bin/kubeconform
           key: kubeconform-v0.6.4-${{ runner.os }}
+
       - name: install kubeconform
+        if: steps.cache-kubeconform.outputs.cache-hit != 'true'
         run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.4
-        if: ${{ !steps.cache-kubeconform.outputs.cache-hit }}
 
       - name: validate k8s manifest
-        run: kubeconform -strict kube/
+        run: ~/go/bin/kubeconform -strict kube/
 
-      # ---- compose manifest validation (compose-spec schema) ----
       - name: validate compose manifest
         run: docker compose -f compose/compose.yml config --quiet
 
-  # ---- unit tests (no Docker needed) ----
-  unit-tests:
+  tests:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write
+    env:
+      COVERAGE_MIN: "85"
+      COVERAGE_TARGET: "95"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -87,42 +76,173 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: 'go.mod'
+          go-version-file: go.mod
           cache: true
 
-      - name: unit tests
-        run: go test -race -cover ./...
+      - name: Test
+        id: test
+        shell: bash
+        run: |
+          set +e
+          go test -race -covermode=atomic -tags=integration -coverprofile=cover.out -json ./... > test.json
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          echo "::group::go test output"
+          jq -j 'select(.Action=="output") | .Output' test.json
+          echo "::endgroup::"
 
-  # ---- integration tests (needs Docker for testcontainers) ----
-  integration-tests:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
+      - name: Build report
+        id: report
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          TEST_EXIT: ${{ steps.test.outputs.exit }}
+          PKG_PREFIX: github.com/${{ github.repository }}/
+          PACKAGE_NAME: engram
+        run: |
+          PASSED=$(jq -s '[.[] | select(.Test != null and .Action=="pass")] | length' test.json)
+          FAILED=$(jq -s '[.[] | select(.Test != null and .Action=="fail")] | length' test.json)
+          SKIPPED=$(jq -s '[.[] | select(.Test != null and .Action=="skip")] | length' test.json)
+          TOTAL=$((PASSED + FAILED + SKIPPED))
+
+          # Line coverage (same unit and same number as Coveralls), from the Go profile.
+          COV=0; COV_LINES=""; STMT=0
+          if [ -s cover.out ]; then
+            awk -f scripts/linecov.awk cover.out | sort > linecov.tsv
+            COV=$(awk -F'\t' '$1=="TOTAL" {print $4}' linecov.tsv)
+            COV_LINES=$(awk -F'\t' '$1=="TOTAL" {printf "%d of %d lines", $2, $3}' linecov.tsv)
+            STMT=$(go tool cover -func=cover.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          fi
+          COV=${COV:-0}
+
+          TIER=$(awk -v c="$COV" -v mn="$COVERAGE_MIN" -v tg="$COVERAGE_TARGET" 'BEGIN{
+            if (c+0 >= 100) print "🌟 Excellent";
+            else if (c+0 >= tg+0) print "✅ Good";
+            else if (c+0 >= mn+0) print "⚠️ OK";
+            else print "❌ Failed" }')
+          COV_OK=$(awk -v c="$COV" -v mn="$COVERAGE_MIN" 'BEGIN{print (c+0 >= mn+0) ? "true" : "false"}')
+
+          RUN_OK=true
+          if [ "$TEST_EXIT" != "0" ] || [ "$FAILED" -gt 0 ]; then RUN_OK=false; fi
+
+          if [ "$RUN_OK" = "false" ]; then
+            EMOJI="❌"
+            if [ "$FAILED" -gt 0 ]; then
+              STATUS_TEXT="Tests Failed: $PASSED/$TOTAL passed, $FAILED failed"
+            else
+              STATUS_TEXT="Build or test run failed (exit $TEST_EXIT)"
+            fi
+          elif [ "$COV_OK" = "false" ]; then
+            EMOJI="❌"
+            STATUS_TEXT="Coverage ${COV}% is below minimum ${COVERAGE_MIN}%"
+          else
+            EMOJI="✅"
+            STATUS_TEXT="All tests passed: $PASSED/$TOTAL tests passed"
+          fi
+
+          {
+            echo "## $EMOJI $PACKAGE_NAME - CI Results"
+            echo
+            echo "**Status**: $STATUS_TEXT"
+            echo
+            echo "### 🧪 Test Execution"
+            echo "- **Total Tests**: $TOTAL"
+            echo "- **Passed**: ✅ $PASSED"
+            [ "$FAILED" -gt 0 ] && echo "- **Failed**: ❌ $FAILED"
+            [ "$SKIPPED" -gt 0 ] && echo "- **Skipped**: ⏭️ $SKIPPED"
+
+            if [ "$FAILED" -gt 0 ]; then
+              echo
+              echo "<details><summary>Failed tests</summary>"
+              echo
+              echo '```'
+              jq -r 'select(.Action=="fail" and .Test != null) | "\(.Package) \(.Test)"' test.json | sed "s|$PKG_PREFIX||" | sort -u
+              echo '```'
+              echo "</details>"
+            fi
+
+            echo
+            echo "### 📊 Code Coverage"
+            echo
+            echo "| Scope | Line Coverage | Threshold | Status |"
+            echo "|-------|--------------:|----------:|--------|"
+            echo "| **Total** (${COV_LINES}) | **${COV}%** | ${COVERAGE_MIN}% | $TIER |"
+            awk -F'\t' -v mn="$COVERAGE_MIN" '$1=="DIR" {printf "| %s (%d/%d) | %.1f%% | %s%% | %s |\n", $2, $3, $4, $5, mn, ($5+0 >= mn+0 ? "✅" : "⚠️")}' linecov.tsv
+            echo
+            echo "*Line coverage matches Coveralls. Go statement coverage: ${STMT}%. Tiers: 🌟 100% | ✅ ${COVERAGE_TARGET}-99% | ⚠️ ${COVERAGE_MIN}-$((COVERAGE_TARGET-1))% | ❌ <${COVERAGE_MIN}%. The gate applies to the total; per-package marks are informational.*"
+            echo
+            echo "### 📋 Project Details"
+            echo "- **Coverage Threshold**: ${COVERAGE_MIN}% (Min) | ${COVERAGE_TARGET}% (Target)"
+            echo "- **Ref**: \`${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}\` @ \`${GITHUB_SHA::7}\`"
+            echo
+            echo "See the [workflow run](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) for full logs."
+          } > comment.md
+
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$RUN_OK" = "true" ] && [ "$COV_OK" = "true" ]; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Find existing PR comment
+        id: find-comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork != true }}
+        uses: peter-evans/find-comment@v4
         with:
-          persist-credentials: false
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: github-actions[bot]
+          body-includes: engram - CI Results
 
-      - uses: actions/setup-go@v7
+      - name: Create or update PR comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork != true }}
+        uses: peter-evans/create-or-update-comment@v5
         with:
-          go-version-file: 'go.mod'
-          cache: true
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: comment.md
+          edit-mode: replace
 
-      - name: integration tests (pgvector)
-        run: go test -tags=integration -race ./internal/store/...
+      - name: Upload artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: |
+            cover.out
+            linecov.tsv
+            test.json
+            comment.md
+          retention-days: 7
+          if-no-files-found: ignore
 
-  # ---- Docker build test ----
+      - name: Upload coverage to Coveralls
+        if: ${{ !cancelled() && hashFiles('cover.out') != '' && github.event.pull_request.head.repo.fork != true }}
+        uses: coverallsapp/github-action@v2
+        with:
+          file: cover.out
+          format: golang
+          fail-on-error: false
+          github-token: ${{ secrets.COVERALLS_TOKEN }}
+
+      - name: Enforce gate
+        if: ${{ !cancelled() }}
+        env:
+          PASSED: ${{ steps.report.outputs.passed }}
+        run: |
+          if [ "$PASSED" != "true" ]; then
+            echo "::error::Tests failed or coverage is below ${COVERAGE_MIN}% (see report)"
+            exit 1
+          fi
+
   docker-build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: set up docker buildx
-        uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       - name: build Docker image
         uses: docker/build-push-action@v7
@@ -136,3 +256,31 @@ jobs:
       - name: verify HEALTHCHECK
         run: |
           docker inspect --format='{{json .Config.Healthcheck}}' engram-ci-test:latest | python3 -m json.tool
+
+  ci-summary:
+    runs-on: ubuntu-latest
+    needs: [checks, tests, docker-build]
+    if: always()
+    steps:
+      - name: Check CI status
+        run: |
+          failed=0
+          check_job() {
+            case "$2" in
+              success) echo "✅ **$1**: Passed" >> "$GITHUB_STEP_SUMMARY" ;;
+              skipped) echo "⏭️ **$1**: Skipped" >> "$GITHUB_STEP_SUMMARY" ;;
+              cancelled) echo "❌ **$1**: Cancelled (treated as failure)" >> "$GITHUB_STEP_SUMMARY"; failed=$((failed + 1)) ;;
+              *) echo "❌ **$1**: Failed" >> "$GITHUB_STEP_SUMMARY"; failed=$((failed + 1)) ;;
+            esac
+          }
+          echo "## 🧪 CI - Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          check_job "Checks (lint, manifests)" "${{ needs.checks.result }}"
+          check_job "Tests + coverage" "${{ needs.tests.result }}"
+          check_job "Docker build" "${{ needs.docker-build.result }}"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          if [ "$failed" -gt 0 ]; then
+            echo "### ❌ CI Failed: $failed job(s) failed" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "### ✅ CI Passed" >> "$GITHUB_STEP_SUMMARY"
