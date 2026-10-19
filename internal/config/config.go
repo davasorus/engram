@@ -27,6 +27,8 @@ type Config struct {
 	Healthcheck     bool
 	MaxConns        int32
 	MinConns        int32
+	_maxConns       int // internal, used for flag binding
+	_minConns       int // internal, used for flag binding
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
 }
@@ -43,11 +45,10 @@ func DefineFlags(fs *flag.FlagSet) *Config {
 	fs.BoolVar(&c.Stdio, "stdio", false, "run MCP over stdio")
 	fs.BoolVar(&c.Healthcheck, "healthcheck", false, "probe /api/health and exit")
 	// flag.FlagSet has no Int32Var; use int then cast.
-	var maxConns, minConns int
-	fs.IntVar(&maxConns, "db-max-conns", envInt("ENGRAM_DB_MAX_CONNS", 0), "max Postgres pool connections")
-	fs.IntVar(&minConns, "db-min-conns", envInt("ENGRAM_DB_MIN_CONNS", 0), "min idle Postgres pool connections")
-	c.MaxConns = int32(maxConns)
-	c.MinConns = int32(minConns)
+	// We defer setting MaxConns/MinConns to Resolve() because the flag
+	// values are only available after flag.Parse().
+	fs.IntVar(&c._maxConns, "db-max-conns", envInt("ENGRAM_DB_MAX_CONNS", 0), "max Postgres pool connections")
+	fs.IntVar(&c._minConns, "db-min-conns", envInt("ENGRAM_DB_MIN_CONNS", 0), "min idle Postgres pool connections")
 	fs.DurationVar(&c.ConnMaxLifetime, "db-conn-max-lifetime", envDuration("ENGRAM_DB_CONN_MAX_LIFETIME", 0), "max lifetime of a pooled connection")
 	fs.DurationVar(&c.ConnMaxIdleTime, "db-conn-max-idle-time", envDuration("ENGRAM_DB_CONN_MAX_IDLE_TIME", 0), "max idle time of a pooled connection")
 	return c
@@ -57,7 +58,11 @@ func DefineFlags(fs *flag.FlagSet) *Config {
 // Call this after flag.Parse().
 func (c *Config) Resolve() {
 	if c.DSN == "" {
-		c.DSN = resolveDSN()
+		if dsn := env("ENGRAM_DSN", ""); dsn != "" {
+			c.DSN = dsn
+		} else {
+			c.DSN = resolveDSN()
+		}
 	}
 	if c.EmbedModel == "" {
 		c.EmbedModel = env("ENGRAM_EMBED_MODEL", "text-embedding-nomic-embed-text-v1.5")
@@ -68,6 +73,9 @@ func (c *Config) Resolve() {
 	c.EmbedURLs = splitCSV(env("ENGRAM_EMBED_URL", "http://127.0.0.1:1234"))
 	c.CompleteURLs = splitCSV(env("ENGRAM_COMPLETE_URL", ""))
 	c.MCPTools = splitCSV(env("ENGRAM_MCP_TOOLS", ""))
+	// Apply pool settings from parsed flags (env fallback already in defaults)
+	c.MaxConns = int32(c._maxConns)
+	c.MinConns = int32(c._minConns)
 }
 
 // resolveDSN assembles a DSN from discrete ENGRAM_DB_* env vars.

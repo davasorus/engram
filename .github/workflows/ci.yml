@@ -90,8 +90,18 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: unit tests
-        run: go test -race -cover ./...
+      - name: unit tests + coverage gating
+        run: |
+          THRESHOLD=85
+          go test -race -cover -tags=integration -coverprofile=cover.out ./...
+          TOTAL=$(go tool cover -func=cover.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "Global coverage: ${TOTAL}%"
+          if [ "$TOTAL" -lt "$THRESHOLD" ]; then
+            echo "::error::Coverage ${TOTAL}% is below threshold ${THRESHOLD}%"
+            echo "Below-threshold packages:"
+            go tool cover -func=cover.out | awk '{if ($3+0 < 85 && $1 != "") printf "  %-40s %s%%\n", $1, $3}'
+            exit 1
+          fi
 
   # ---- integration tests (needs Docker for testcontainers) ----
   integration-tests:

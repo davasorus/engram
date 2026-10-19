@@ -419,6 +419,21 @@ func TestIsNotFound(t *testing.T) {
 	// notFoundErr wraps ErrNotFound.
 	err := core.IsNotFound(errors.New("wrapped: " + core.ErrNotFound.Error()))
 	_ = err // just checking the error type
+
+	// notFoundf creates a notFoundErr; verify its Error() method works
+	// (this exercises the 0% coverage line in validate.go).
+	// Create via a public path: Patch on a nonexistent note.
+	e := newEngine(t)
+	ctx := context.Background()
+	_, err2 := e.Patch(ctx, "no-such-note", "a", "b")
+	if !core.IsNotFound(err2) {
+		t.Fatalf("expected NotFound, got %v", err2)
+	}
+	// Verify the error message is set (triggers notFoundErr.Error()).
+	msg := err2.Error()
+	if msg == "" {
+		t.Fatal("expected non-empty error message from notFoundErr.Error()")
+	}
 }
 
 func TestIsInvalidInput(t *testing.T) {
