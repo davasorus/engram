@@ -67,7 +67,7 @@ jobs:
       contents: read
       pull-requests: write
     env:
-      COVERAGE_MIN: "80"
+      COVERAGE_MIN: "85"
       COVERAGE_TARGET: "95"
     steps:
       - uses: actions/checkout@v7
