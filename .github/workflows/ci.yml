@@ -12,15 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GO_VERSION: "1.25"
-
 jobs:
-  # ---- lint, schema, and asset checks (no Docker needed) ----
   checks:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -28,22 +22,15 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: "go.mod"
+          go-version-file: go.mod
           cache: true
 
-      # govet, gofmt, goimports all run via golangci-lint —
-      # no standalone steps, one source of truth (.golangci.yml).
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
-          # setup-go above already caches modules/build artifacts;
-          # avoid the action double-caching the same dirs.
           skip-cache: true
 
-      # Vendored JS (htmx/alpine in internal/web/static) must match the
-      # versions in package.json — the manifest dependabot tracks. Node is
-      # preinstalled on ubuntu runners.
       - name: vendored asset drift check
         run: sh scripts/check-asset-drift.sh
 
@@ -57,29 +44,27 @@ jobs:
             esac
           done < compose/.env.example
 
-      # ---- k8s manifest validation ----
       - name: cache kubeconform
         id: cache-kubeconform
         uses: actions/cache@v6
         with:
-          path: ~/.local/bin/kubeconform
+          path: ~/go/bin/kubeconform
           key: kubeconform-v0.6.4-${{ runner.os }}
+
       - name: install kubeconform
+        if: steps.cache-kubeconform.outputs.cache-hit != 'true'
         run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.4
-        if: ${{ !steps.cache-kubeconform.outputs.cache-hit }}
 
       - name: validate k8s manifest
-        run: kubeconform -strict kube/
+        run: ~/go/bin/kubeconform -strict kube/
 
-      # ---- compose manifest validation (compose-spec schema) ----
       - name: validate compose manifest
         run: docker compose -f compose/compose.yml config --quiet
 
-  # ---- unit tests (no Docker needed) ----
-  unit-tests:
+  tests:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    env:
+      COVERAGE_THRESHOLD: "85"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -87,62 +72,100 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: "go.mod"
+          go-version-file: go.mod
           cache: true
 
-      - name: unit tests + coverage gating
+      - name: test + coverage
+        shell: bash
         run: |
-          THRESHOLD=85
-          go test -race -cover -tags=integration -coverprofile=cover.out ./...
-          TOTAL=$(go tool cover -func=cover.out | tail -1 | awk '{print $3}' | tr -d '%')
-          echo "Global coverage: ${TOTAL}%"
-          if [ "$TOTAL" -lt "$THRESHOLD" ]; then
-            echo "::error::Coverage ${TOTAL}% is below threshold ${THRESHOLD}%"
-            echo "Below-threshold packages:"
-            go tool cover -func=cover.out | awk '{if ($3+0 < 85 && $1 != "") printf "  %-40s %s%%\n", $1, $3}'
+          set +e
+          go test -race -covermode=atomic -tags=integration -coverprofile=cover.out ./... 2>&1 | tee test.log
+          TEST_STATUS=${PIPESTATUS[0]}
+          set -e
+
+          {
+            echo "## Test & coverage report"
+            echo
+
+            if [ "$TEST_STATUS" -ne 0 ]; then
+              echo "### ❌ Tests failed"
+              echo '```'
+              grep -E '^(--- FAIL|FAIL|panic:)' test.log | sort -u
+              echo '```'
+              echo
+            fi
+
+            echo "| Package | Coverage | Status |"
+            echo "|---|---:|:---:|"
+            awk -v th="$COVERAGE_THRESHOLD" '
+              /^ok .*coverage:/ {
+                pkg=$2
+                for (i=1; i<=NF; i++) if ($i=="coverage:") pct=$(i+1)
+                sub(/%/, "", pct)
+                sub(/^github.com\/[^\/]+\/[^\/]+\//, "", pkg)
+                printf "| %s | %.1f%% | %s |\n", pkg, pct, (pct+0 >= th ? "✅" : "⚠️")
+              }
+              /^FAIL[ \t]/ && $2 != "" {
+                pkg=$2
+                sub(/^github.com\/[^\/]+\/[^\/]+\//, "", pkg)
+                printf "| %s | – | ❌ |\n", pkg
+              }
+            ' test.log
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$TEST_STATUS" -ne 0 ]; then
+            echo "::error::Tests failed (see job summary)"
+            exit "$TEST_STATUS"
+          fi
+
+          TOTAL=$(go tool cover -func=cover.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          echo "TOTAL_COVERAGE=$TOTAL" >> "$GITHUB_ENV"
+
+          if awk -v t="$TOTAL" -v th="$COVERAGE_THRESHOLD" 'BEGIN{exit !(t+0 < th+0)}'; then
+            {
+              echo "**Total: ${TOTAL}% — ❌ below gate of ${COVERAGE_THRESHOLD}%**"
+              echo
+              echo "<details><summary>Lowest-covered functions</summary>"
+              echo
+              echo '```'
+              go tool cover -func=cover.out | awk '$1 != "total:" {print $3, $1, $2}' | sort -n | head -15
+              echo '```'
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Coverage ${TOTAL}% is below the ${COVERAGE_THRESHOLD}% gate"
             exit 1
           fi
 
-      - name: Upload coverage to Coveralls
+          echo "**Total: ${TOTAL}% — ✅ meets gate of ${COVERAGE_THRESHOLD}%**" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload coverage artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            cover.out
+            test.log
+          if-no-files-found: ignore
+
+      - name: upload coverage to Coveralls
+        if: ${{ !cancelled() && hashFiles('cover.out') != '' && github.event.pull_request.head.repo.fork != true }}
         uses: coverallsapp/github-action@v2
         with:
           file: cover.out
           format: golang
-          flag-name: unit-tests
-          parallel: true
-          fail-on-error: true
+          fail-on-error: false
           github-token: ${{ secrets.COVERALLS_TOKEN }}
 
-  # ---- integration tests (needs Docker for testcontainers) ----
-  integration-tests:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: "go.mod"
-          cache: true
-
-      - name: integration tests (pgvector)
-        run: go test -tags=integration -race ./internal/store/...
-
-  # ---- Docker build test ----
   docker-build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: set up docker buildx
-        uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       - name: build Docker image
         uses: docker/build-push-action@v7
@@ -156,13 +179,3 @@ jobs:
       - name: verify HEALTHCHECK
         run: |
           docker inspect --format='{{json .Config.Healthcheck}}' engram-ci-test:latest | python3 -m json.tool
-
-  coveralls-finish:
-    needs: [unit-tests, integration-tests]
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: coverallsapp/github-action@v2
-        with:
-          parallel-finished: true
-          github-token: ${{ secrets.COVERALLS_TOKEN }}
