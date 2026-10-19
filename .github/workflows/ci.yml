@@ -156,3 +156,13 @@ jobs:
       - name: verify HEALTHCHECK
         run: |
           docker inspect --format='{{json .Config.Healthcheck}}' engram-ci-test:latest | python3 -m json.tool
+
+  coveralls-finish:
+    needs: [unit-tests, integration-tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: coverallsapp/github-action@v2
+        with:
+          parallel-finished: true
+          github-token: ${{ secrets.COVERALLS_TOKEN }}
