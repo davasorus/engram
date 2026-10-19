@@ -1,6 +1,7 @@
 # engram
 
 ![ci](https://github.com/davasorus/engram/actions/workflows/ci.yml/badge.svg)
+![coverage](https://codecov.io/gh/davasorus/engram/branch/live/graph/badge.svg)
 
 engram is a containerized memory service for an AI agent. It is a brain, not
 an Obsidian clone. It stores markdown notes as data in Postgres, not as

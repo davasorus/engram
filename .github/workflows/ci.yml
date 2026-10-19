@@ -103,6 +103,12 @@ jobs:
             exit 1
           fi
 
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./cover.out
+          fail_on_error: true
+
   # ---- integration tests (needs Docker for testcontainers) ----
   integration-tests:
     runs-on: ubuntu-latest

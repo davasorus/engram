@@ -1166,3 +1166,121 @@ func (f *fakeSummarizer) Configured() bool { return true }
 func (f *fakeSummarizer) Complete(_ context.Context, prompt string) (string, error) {
 	return f.text, nil
 }
+
+// TestReembedAll_ContextCancellation verifies that context cancellation is
+// propagated during reembedAll (the loop that iterates over all notes).
+func TestReembedAll_ContextCancellation(t *testing.T) {
+	m := newMem()
+	e := core.NewEngine(m, fakeEmbedder{})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Pre-populate many notes so the loop has work to do.
+	for i := 0; i < 50; i++ {
+		id := fmt.Sprintf("ctx-cancel-%d", i)
+		m.notes[id] = core.Note{
+			ID: id, Title: id, Body: "content",
+			Links: []string{"[[Target]]"},
+		}
+	}
+
+	// Cancel the context before starting reembedAll.
+	cancel()
+
+	_, err := e.Reembed(ctx, true)
+	if err == nil {
+		t.Fatal("expected context cancellation error")
+	}
+	if err.Error() != "context canceled" {
+		t.Fatalf("expected 'context canceled', got %v", err)
+	}
+}
+
+// TestReembedMissingWithContextCancellation verifies that context cancellation
+// is propagated during reembedMissing (the goroutine-based path).
+func TestReembedMissing_ContextCancellation(t *testing.T) {
+	m := newMem()
+	e := core.NewEngine(m, fakeEmbedder{})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Pre-populate notes without vectors.
+	for i := 0; i < 50; i++ {
+		id := fmt.Sprintf("ctx-missing-%d", i)
+		m.notes[id] = core.Note{
+			ID: id, Title: id, Body: "content",
+			Links: []string{"[[Target]]"},
+		}
+	}
+
+	// Cancel before starting.
+	cancel()
+
+	_, err := e.Reembed(ctx, false)
+	if err == nil {
+		t.Fatal("expected context cancellation error")
+	}
+	if err.Error() != "context canceled" {
+		t.Fatalf("expected 'context canceled', got %v", err)
+	}
+}
+
+// memStoreFailKeyword is a memStore that fails KeywordSearch to test hybrid
+// degradation paths.
+type memStoreFailKeyword struct {
+	memStore
+}
+
+func (m *memStoreFailKeyword) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
+	return nil, fmt.Errorf("keyword search failed")
+}
+
+// memStoreFailBoth fails both SearchSemantic and KeywordSearch.
+type memStoreFailBoth struct {
+	memStore
+}
+
+func (m *memStoreFailBoth) SearchSemantic(_ context.Context, _ string, _ []float32, _ int) ([]core.SearchHit, error) {
+	return nil, fmt.Errorf("semantic search failed")
+}
+
+func (m *memStoreFailBoth) KeywordSearch(_ context.Context, _ string, _ string, _ int) ([]core.Note, error) {
+	return nil, fmt.Errorf("keyword search failed")
+}
+
+// TestHybridSemanticFailsDegradesToKeyword verifies that when semantic search
+// fails but keyword succeeds, hybrid degrades to keyword results.
+func TestHybridSemanticFailsDegradesToKeyword(t *testing.T) {
+	failingStore := &memStoreFailSemantic{
+		memStore: memStore{notes: map[string]core.Note{
+			"kw-only": {ID: "kw-only", Title: "Keyword Only", Body: "contains keyword"},
+		}},
+	}
+	e := core.NewEngine(failingStore, failEmbedder{})
+	ctx := context.Background()
+
+	hits, err := e.Search(ctx, "", "keyword", 10, "hybrid")
+	if err != nil {
+		t.Fatalf("expected success (degraded to keyword), got %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected hits from keyword degradation")
+	}
+	if hits[0].Note.ID != "kw-only" {
+		t.Fatalf("expected kw-only, got %q", hits[0].Note.ID)
+	}
+}
+
+// failEmbedder always fails embedding to test semantic degradation.
+type failEmbedder struct{}
+
+func (failEmbedder) Model() string { return "fail" }
+func (failEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
+	return nil, fmt.Errorf("embedding failed")
+}
+
+// memStoreFailSemantic is a memStore that fails SearchSemantic to test
+// hybrid degradation paths.
+type memStoreFailSemantic struct{ memStore }
+
+func (m *memStoreFailSemantic) SearchSemantic(_ context.Context, _ string, _ []float32, _ int) ([]core.SearchHit, error) {
+	return nil, fmt.Errorf("semantic search failed")
+}
