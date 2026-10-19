@@ -107,7 +107,7 @@ jobs:
         uses: coverallsapp/github-action@v2
         with:
           file: cover.out
-          format: gcov
+          format: golang
           flag-name: unit-tests
           parallel: true
           fail-on-error: true
