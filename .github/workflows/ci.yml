@@ -103,12 +103,15 @@ jobs:
             exit 1
           fi
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
         with:
-          files: ./cover.out
-          fail_on_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
+          file: cover.out
+          format: gcov
+          flag-name: unit-tests
+          parallel: true
+          fail-on-error: true
+          token: ${{ secrets.COVERALLS_TOKEN }}
 
   # ---- integration tests (needs Docker for testcontainers) ----
   integration-tests:
