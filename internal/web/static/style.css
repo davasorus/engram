@@ -27,6 +27,7 @@ a:hover { text-decoration: underline; }
   padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
 }
 .newbtn { color: var(--green); border-color: var(--green); }
+.delbtn { color: var(--red); border-color: var(--red); }
 .statsbtn {
   background: var(--bg); border: 1px solid var(--line); color: var(--ink);
   padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;

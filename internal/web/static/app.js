@@ -41,6 +41,14 @@ document.addEventListener("DOMContentLoaded", function () { renderRich(document)
 // Re-render after HTMX swaps content (e.g. live preview updates).
 document.body && document.addEventListener("htmx:afterSwap", function (e) { renderRich(e.target); });
 
+// --- delete note -----------------------------------------------------------
+function deleteNote(id) {
+  var encoded = encodeURIComponent(id);
+  fetch("/api/notes/" + encoded, { method: "DELETE" }).then(function (r) {
+    if (r.ok) location.href = "/";
+  }).catch(function () { alert("delete failed"); });
+}
+
 // --- Alpine component: wikilink autocomplete --------------------------------
 // Registered via the alpine:init event so the component is guaranteed to be
 // defined before Alpine scans the DOM for x-data — otherwise a load-order race

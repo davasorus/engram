@@ -6,6 +6,7 @@
     <div class="note-head-right">
       {{if .Note.Project}}<span class="project-badge" title="project scope">{{.Note.Project}}</span>{{end}}
       <a class="editbtn" href="/edit/{{.Note.ID}}">edit</a>
+      <button class="delbtn" onclick="if(confirm('Delete {{.Note.Title}}?')) deleteNote('{{.Note.ID}}')">delete</button>
     </div>
   </div>
   {{if .Note.Tags}}<div class="tags">{{range .Note.Tags}}<span class="tag">{{.}}</span>{{end}}</div>{{end}}
